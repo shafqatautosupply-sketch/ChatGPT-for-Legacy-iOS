@@ -1,4 +1,4 @@
-# Legacy-Chatbox (Agentic Edition)
+# Agentic
 
 > *A lightweight AI client and native Agentic Harness tailored for legacy iOS devices.*
 
@@ -6,7 +6,7 @@
 
 ## Overview
 
-**Legacy-Chatbox (Agentic Edition)** is a lightweight AI chat client and native agent execution framework designed specifically for legacy iOS devices. Building upon standard OpenAI-compatible provider support, this version **deeply integrates Google's native API endpoints and a lightweight native Tool Calling framework**, introducing full Agentic Harness capabilities to iOS 6 hardware.
+**Agentic** is a lightweight AI chat client and native agent execution framework designed specifically for legacy iOS devices. Building upon standard OpenAI-compatible provider support, this version **deeply integrates Google's native API endpoints and a lightweight native Tool Calling framework**, introducing full Agentic Harness capabilities to iOS 6 hardware.
 
 ---
 
