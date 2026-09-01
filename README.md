@@ -6,7 +6,7 @@
 
 ## Overview
 
-**Agentic** is a lightweight AI chat client and native agent execution framework designed specifically for legacy iOS devices. Building upon standard OpenAI-compatible provider support, this version **deeply integrates Google's native API endpoints and a lightweight native Tool Calling framework**, introducing full Agentic Harness capabilities to iOS 6 hardware.
+**Agentic** is a lightweight AI chat client and native agent execution framework designed specifically for legacy iOS devices. Building upon standard provider support, this version **deeply integrates Google's native API endpoints and a lightweight native Tool Calling framework**, introducing full Agentic Harness capabilities to iOS 6 hardware.
 
 ---
 
@@ -14,7 +14,7 @@
 
 - **Google Native API Integration**: Direct communication with Google's generative AI API endpoints.
 - **Native Tool Calling Framework**: Runs a lightweight Agentic Harness on iOS 6, empowering models to dynamically invoke tools and execute tasks.
-- **Multi-Provider Profiles**: Easily configure, save, and switch between Google API and OpenAI-compatible endpoints.
+- **Multi-Provider Profiles**: Easily configure, save, and switch between Google API and compatible endpoints.
 - **Editable System Prompt**: Customize or clear the runtime system prompt sent prior to requests.
 - **Local Secure Storage**: All conversation history and API keys remain strictly local on device.
 - **Streaming & Reasoning Display**: SSE streaming support with dynamic reasoning/thinking display and collapsing.
@@ -51,8 +51,7 @@ To build and install the package from source using Theos:
 
 Open **`Settings > Model Configurations`** on your device to add your provider profile:
 
-- **Base URL**: The API root endpoint address.
-- **Chat Path**: The API endpoint path.
+- **Base URL**: The API endpoint address.
 - **Model**: Exact model identifier.
 - **API Key**: Your API credential (stored locally).
 - **Tool Calling**: Enable and configure native tool-calling parameters.
