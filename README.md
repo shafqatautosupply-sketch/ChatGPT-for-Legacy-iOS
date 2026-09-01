@@ -2,8 +2,6 @@
 
 > *A lightweight AI client and native Agentic Harness tailored for legacy iOS devices.*
 
-[![Download .deb](https://img.shields.io/badge/Download-.deb%20Package-blue?style=for-the-badge&logo=app-store)](https://github.com/shafqatautosupply-sketch/ChatGPT-for-Legacy-iOS/releases/latest/download/ChatGPT-for-Legacy-iOS.deb)
-
 ---
 
 ## Overview
@@ -32,14 +30,10 @@
 
 ---
 
-## Download & Installation
+## Build & Installation
 
-### Option 1: Direct Download (Recommended)
-You can download the pre-compiled `.deb` package directly for your jailbroken device:
-👉 [Download Latest `.deb` Release](https://github.com/shafqatautosupply-sketch/ChatGPT-for-Legacy-iOS/releases/latest/download/ChatGPT-for-Legacy-iOS.deb)
+To build and install the package from source using Theos:
 
-### Option 2: Build from Source (Theos)
-If you prefer building it yourself using Theos:
 1. Ensure Theos is installed on your development environment.
 2. Navigate to the app directory:
    ```sh
@@ -49,7 +43,7 @@ If you prefer building it yourself using Theos:
    ```sh
    make package FINALPACKAGE=1
    ```
-4. The generated `.deb` package will be located in `theos/LegacyChatApp/packages/`.
+4. Locate the generated `.deb` package in `theos/LegacyChatApp/packages/` and install it onto your jailbroken iOS 6 device.
 
 ---
 
