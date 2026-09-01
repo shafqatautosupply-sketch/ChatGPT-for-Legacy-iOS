@@ -126,6 +126,7 @@ static NSInteger LCConversationSort(id leftValue, id rightValue, void *context) 
 	if (![message.role isEqualToString:@"user"] &&
 		![message.role isEqualToString:@"assistant"] &&
 		![message.role isEqualToString:@"system"] &&
+		![message.role isEqualToString:@"tool"] &&
 		![message.role isEqualToString:@"local"]) {
 		return NO;
 	}
@@ -173,6 +174,11 @@ static NSInteger LCConversationSort(id leftValue, id rightValue, void *context) 
 		[dictionary setObject:tc forKey:@"tool_calls"];
 	}
 
+	NSString *toolName = message.toolName;
+	if ([toolName length] > 0) {
+		[dictionary setObject:toolName forKey:@"tool_name"];
+	}
+
 	return dictionary;
 }
 
@@ -180,7 +186,7 @@ static NSInteger LCConversationSort(id leftValue, id rightValue, void *context) 
 	CGMessage *message = [[[CGMessage alloc] init] autorelease];
 	message.role = [dictionary objectForKey:@"role"] ?: @"assistant";
 	message.content = [dictionary objectForKey:@"content"] ?: [dictionary objectForKey:@"message"] ?: @"";
-	message.author = [dictionary objectForKey:@"name"] ?: @"AI Assistant";
+	message.author = [dictionary objectForKey:@"name"] ?: ([message.role isEqualToString:@"tool"] ? @"Tool Output" : @"AI Assistant");
 
 	NSString *toolCallID = [dictionary objectForKey:@"tool_call_id"] ?: [dictionary objectForKey:@"toolCallID"];
 	if ([toolCallID length] > 0) {
@@ -190,6 +196,11 @@ static NSInteger LCConversationSort(id leftValue, id rightValue, void *context) 
 	NSArray *toolCalls = [dictionary objectForKey:@"tool_calls"] ?: [dictionary objectForKey:@"toolCalls"];
 	if ([toolCalls isKindOfClass:[NSArray class]]) {
 		message.toolCalls = toolCalls;
+	}
+
+	NSString *toolName = [dictionary objectForKey:@"tool_name"] ?: [dictionary objectForKey:@"toolName"];
+	if ([toolName length] > 0) {
+		message.toolName = toolName;
 	}
 
 	message.type = [message.role isEqualToString:@"user"] ? 1 : 2;
@@ -210,8 +221,29 @@ static NSInteger LCConversationSort(id leftValue, id rightValue, void *context) 
 
 	NSInteger keepCount = (recentCount < [messages count]) ? recentCount : 1;
 	NSRange recentRange = NSMakeRange([messages count] - keepCount, keepCount);
+
+	// Prevent starting recent range on an orphan tool response message
+	while (recentRange.location < [messages count]) {
+		id msgObj = [messages objectAtIndex:recentRange.location];
+		NSString *role = nil;
+		if ([msgObj isKindOfClass:[CGMessage class]]) {
+			role = ((CGMessage *)msgObj).role;
+		} else if ([msgObj isKindOfClass:[NSDictionary class]]) {
+			role = [(NSDictionary *)msgObj objectForKey:@"role"];
+		}
+		if ([role isEqualToString:@"tool"]) {
+			recentRange.location++;
+			recentRange.length--;
+		} else {
+			break;
+		}
+	}
+	if (recentRange.length <= 0) {
+		recentRange = NSMakeRange([messages count] - 1, 1);
+	}
+
 	NSArray *recentMessages = [messages subarrayWithRange:recentRange];
-	NSArray *olderMessages = [messages subarrayWithRange:NSMakeRange(0, [messages count] - keepCount)];
+	NSArray *olderMessages = [messages subarrayWithRange:NSMakeRange(0, recentRange.location)];
 
 	if ([olderMessages count] == 0) {
 		return messages;
@@ -334,6 +366,18 @@ static NSInteger LCConversationSort(id leftValue, id rightValue, void *context) 
 	NSInteger totalCount = [messages count];
 	NSInteger limit = [self loadedMessageLimit];
 	NSInteger startIndex = (limit > 0 && totalCount > limit) ? totalCount - limit : 0;
+
+	// Prevent starting load window on an orphan tool response message
+	while (startIndex < totalCount) {
+		NSDictionary *msgDict = [messages objectAtIndex:startIndex];
+		NSString *role = [msgDict objectForKey:@"role"];
+		if ([role isEqualToString:@"tool"]) {
+			startIndex++;
+		} else {
+			break;
+		}
+	}
+
 	for (NSInteger i = startIndex; i < totalCount; i++) {
 		NSDictionary *messageDictionary = [messages objectAtIndex:i];
 		CGMessage *message = [self messageFromDictionary:messageDictionary];
@@ -346,7 +390,8 @@ static NSInteger LCConversationSort(id leftValue, id rightValue, void *context) 
 }
 
 + (CGConversation *)conversationWithIdentifier:(NSString *)identifier {
-	return [self loadConversationWithIdentifier:identifier];
+	CGConversation *conv = [self loadConversationWithIdentifier:identifier];
+	return conv;
 }
 
 + (NSArray *)loadConversations {
@@ -435,8 +480,7 @@ static NSInteger LCConversationSort(id leftValue, id rightValue, void *context) 
 	NSString *nowString = [self stringFromDate:[NSDate date]];
 	NSString *filePath = [self pathForConversationIdentifier:conversationID];
 	NSDictionary *existingConversation = [NSDictionary dictionaryWithContentsOfFile:filePath];
-	NSString *createdAt = [existingConversation objectForKey:@"createdAt"];
-	[createdAt length]; // referenced
+	NSString *createdAt = [existingConversation objectForKey:@"conversationID"] ? [existingConversation objectForKey:@"createdAt"] : nil;
 	if ([createdAt length] == 0) {
 		createdAt = nowString;
 	}
