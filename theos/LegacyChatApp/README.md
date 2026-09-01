@@ -1,34 +1,74 @@
-# LegacyChatApp 0.1.0
+# Agentic
 
-LegacyChatApp is an advanced AI assistant and autonomous agent client built for legacy iOS devices (iOS 6) using Theos. It bridges classic iOS hardware with the Google Gemini API, featuring autonomous tool execution, shell command guardrails, thinking/reasoning configuration, and lightweight Markdown support.
+> *A lightweight AI client and native Agentic Harness tailored for legacy iOS devices.*
+
+---
+
+## Overview
+
+**Agentic** is a lightweight AI chat client and native agent execution framework designed specifically for legacy iOS devices. Building upon standard provider support, this version **deeply integrates Google's native API endpoints and a lightweight native Tool Calling framework**, introducing full Agentic Harness capabilities to iOS 6 hardware.
+
+---
+
+## Key Features
+
+- **Google Native API Integration**: Direct communication with Google's generative AI API endpoints.
+- **Native Tool Calling Framework**: Runs a lightweight Agentic Harness on iOS 6, empowering models to dynamically invoke tools and execute tasks.
+- **Multi-Provider Profiles**: Easily configure, save, and switch between Google API and compatible endpoints.
+- **Editable System Prompt**: Customize or clear the runtime system prompt sent prior to requests.
+- **Local Secure Storage**: All conversation history and API keys remain strictly local on device.
+- **Streaming & Reasoning Display**: SSE streaming support with dynamic reasoning/thinking display and collapsing.
+- **Authentic iOS 6 Interface**: Meticulously styled with classic UIKit elements, navigation bars, buttons, launch images, and app icons tailored for retro Apple hardware.
+
+---
 
 ## Supported Devices
 
-- iPhone 4 / 4S (iOS 6, 3.5-inch portrait)
-- iPhone 5 (iOS 6, 4-inch portrait)
-- iPad 4 (iOS 6, portrait)
+- **iPhone 4S (iOS 6, Portrait)** — *Primary tested and verified device*
+- iPhone 4 / iPhone 5 (iOS 6, Portrait)
+- iPad 4 (iOS 6, Portrait)
 
-## Main Features
+---
 
-- **Google Gemini API Integration**: Native support for Gemini model endpoints, system instructions, and `x-goog-api-key` authorization.
-- **Autonomous Agent Mode**: Multi-turn agent loop supporting tool execution (`runShellCommand`, `writeFile`).
-- **Safety Guardrails**: Strict whitelist for binaries (`make`, `git`, `clang`, `cc`, `c++`, `dpkg-deb`, `ldid`, `echo`, `cat`, `ls`, `cp`, `mv`, `mkdir`, `rm`) scoped securely within the workspace/Theos directory.
-- **High Reasoning Support**: Configured with `thinkingLevel: "HIGH"` for enhanced problem solving.
-- **Local Conversation History**: Persistent local chat storage.
-- **Lightweight Markdown**: Clean readability for code snippets, headers, and text formatting.
+## Build & Installation
 
-## Build
+To build and install the package from source using Theos:
 
-```sh
-make package FINALPACKAGE=1
-```
+1. Ensure Theos is installed on your development environment.
+2. Navigate to the app directory:
+   ```sh
+   cd theos/LegacyChatApp
+   ```
+3. Build the package:
+   ```sh
+   make package FINALPACKAGE=1
+   ```
+4. Locate the generated `.deb` package in `theos/LegacyChatApp/packages/` and install it onto your jailbroken iOS 6 device.
 
-Install the generated `.deb` package from `packages/` onto a jailbroken iOS 6 device.
+---
 
-## Provider Setup
+## Configuration Guide
 
-Open **Settings > Model Configurations** to enter your Google Gemini API key and configure model options.
+Open **`Settings > Model Configurations`** on your device to add your provider profile:
 
-## System Prompt
+- **Base URL**: The API endpoint address.
+- **Model**: Exact model identifier.
+- **API Key**: Your API credential (stored locally).
+- **Tool Calling**: Enable and configure native tool-calling parameters.
 
-Open **Settings > System Prompt** to customize or view the system instructions sent with requests.
+---
+
+## Acknowledgments & Credits
+
+This project builds upon the foundational work of talented community developers:
+
+- **Original Creator**: [BagXML](https://github.com/BagXML) — For creating the brilliant foundational legacy iOS AI client repository.
+- **Intermediate Fork Developer**: Li Xiang — For the intermediate modifications and codebase used as a solid starting point for this enhanced edition.
+
+---
+
+## Known Limitations
+
+- Optimized for portrait orientation only.
+- Tool calling and agent execution performance depend on model tool-use capabilities and legacy hardware constraints.
+- No cloud synchronization; all provider settings and chat histories are stored locally.
