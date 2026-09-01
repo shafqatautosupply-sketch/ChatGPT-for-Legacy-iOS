@@ -1,14 +1,14 @@
-# Legacy-Chatbox
+# Legacy-Chatbox (Agentic Edition)
 
 [中文](#中文) | [English](#english)
 
 ## 中文
 
-Legacy-Chatbox 是一个面向旧 iOS 设备的轻量 AI 聊天客户端。当前版本以 iOS 6 时代设备、Theos 打包流程、OpenAI-compatible provider 和接近老 UIKit 的简洁界面为重点。
+Legacy-Chatbox (Agentic Edition) 是一个面向旧 iOS 设备的轻量 AI 聊天客户端与智能体框架。当前版本在支持 OpenAI 兼容接口的基础上，**深度集成了 Google 原生 API 端点以及原生 Tool Calling（工具调用）框架**，在 iOS 6 时代设备上实现了完整的轻量 Agentic Harness（智能体运行环境）。
 
 ### 状态
 
-`0.1.0` 是第一个基于 Theos 的正式发布版本。
+当前版本基于 Theos 构建流程，带有增强的 Google API 与工具调用支持。
 
 原始 Xcode 工程仍保留在仓库中作为参考，当前活跃发布版本位于：
 
@@ -22,23 +22,17 @@ theos/LegacyChatApp
 - iPhone 5，iOS 6，竖屏
 - iPad 4，iOS 6，竖屏
 
-### 功能
+### 核心功能
 
-- OpenAI-compatible provider 配置
-- 多个 provider / model 配置保存与切换
-- 可编辑的 system prompt
-- 本地会话历史
-- provider 支持 SSE 时的流式输出
-- reasoning / thinking 临时显示，并在最终答案出现后隐藏或替换
-- 轻量 Markdown 可读性增强
-- 支持 multimodal OpenAI-compatible 消息的 provider 可使用图片输入
-- iOS 6 风格导航栏、按钮、启动图和图标
+- **Google 原生 API 端点支持**：直接对接 Google 强大的生成式 AI API 接口。
+- **原生 Tool Calling（工具调用）框架**：在 iOS 6 设备上运行轻量 Agentic Harness，支持模型动态调用工具与执行任务。
+- **多 Provider 配置**：支持 Google API 及 OpenAI-compatible provider 配置、保存与快速切换。
+- **系统提示词 (System Prompt)**：可自由编辑或清空每次请求前发送的 system prompt。
+- **本地会话历史**：所有聊天记录与配置完全保存在本地设备上。
+- **流式输出与思考过程展示**：支持 SSE 流式传输，并带有 reasoning / thinking 临时显示与折叠。
+- **iOS 6 经典界面**：高度复刻 iOS 6 风格的导航栏、按钮、启动图和应用图标，完美适配复古设备审美。
 
-### 构建
-
-如果只想安装发布版，可以从 GitHub Releases 下载 `.deb`：
-
-https://github.com/wtfllix/ChatGPT-for-Legacy-iOS/releases/tag/v0.1.0
+### 构建与安装
 
 安装 Theos 后，在 app 目录中构建：
 
@@ -47,7 +41,7 @@ cd theos/LegacyChatApp
 make package FINALPACKAGE=1
 ```
 
-生成的 `.deb` 位于：
+生成的 `.deb` 文件位于：
 
 ```sh
 theos/LegacyChatApp/packages/
@@ -55,54 +49,31 @@ theos/LegacyChatApp/packages/
 
 请将 `.deb` 安装到已越狱的 iOS 6 设备上。
 
-### Provider 配置
+### Provider 与 Tool Calling 配置
 
 在设备上打开 `Settings > Model Configurations` 并添加 provider：
 
-- `Base URL` 应填写服务根地址，例如 `https://api.deepseek.com`。
-- `Chat Path` 只填写接口路径，例如 `/chat/completions`。
-- `Model` 填写 provider 对应的准确模型名。
-- `API Key` 只保存在本机设备上。
-
-默认 provider 不包含 API key。
-
-### System Prompt
-
-`Settings > System Prompt` 可以编辑或清空每次请求前发送的 system prompt。它只会在请求时临时插入，不会保存进会话历史。
-
-默认 prompt：
-
-```text
-You are a concise, helpful assistant in a legacy iOS chat app. Prefer clear, direct answers. Use simple Markdown only when it improves readability, and avoid complex tables or deeply nested formatting.
-```
+- **Base URL**：填写服务根地址（例如 Google API 或兼容网关）。
+- **Chat Path**：填写接口路径。
+- **Model**：填写准确的模型名称。
+- **API Key**：保存在本机设备上。
+- **Tool Calling**：配置并启用原生工具调用框架相关参数。
 
 ### 已知限制
 
-- `0.1.0` 仅支持竖屏。
-- Markdown 是轻量可读性增强，不是完整 Markdown 渲染器。
-- 图片输入取决于 provider 是否支持 multimodal。
-- 流式输出体验取决于 provider 的 SSE 兼容性和旧设备性能。
-- 没有云同步；provider 配置和会话历史只保存在本机。
+- 目前仅支持竖屏。
+- 工具调用及 Agent 执行依赖于所配置模型的原生 tool support 与设备性能。
+- 无云同步，所有数据仅存储于本地。
 
-### 发布测试
-
-测试清单位于：
-
-```sh
-theos/LegacyChatApp/RELEASE_CHECKLIST.md
-```
-
-### 仓库
-
-https://github.com/wtfllix/ChatGPT-for-Legacy-iOS
+---
 
 ## English
 
-Legacy-Chatbox is a lightweight AI chat client for legacy iOS devices. The current release focuses on iOS 6-era hardware, a Theos build pipeline, OpenAI-compatible providers, and a simple interface that feels at home on older UIKit.
+Legacy-Chatbox (Agentic Edition) is a lightweight AI chat client and agent framework for legacy iOS devices. Building upon OpenAI-compatible provider support, this version **deeply integrates the Google native API endpoint and a native Tool Calling framework**, bringing a full-blown lightweight Agentic Harness to iOS 6-era hardware.
 
 ### Status
 
-`0.1.0` is the first release of the Theos-based app.
+This version is built using the Theos build pipeline with enhanced Google API and agentic tool-calling capabilities.
 
 The original Xcode project remains in this repository for reference, but active release work lives in:
 
@@ -116,23 +87,17 @@ theos/LegacyChatApp
 - iPhone 5 on iOS 6, portrait
 - iPad 4 on iOS 6, portrait
 
-### Features
+### Key Features
 
-- OpenAI-compatible provider configuration
-- Multiple saved provider/model profiles
-- Optional editable system prompt
-- Local conversation history
-- Streamed assistant output when the provider supports SSE
-- Temporary thinking/reasoning display with final-answer replacement
-- Lightweight Markdown readability support
-- Image input for providers that support multimodal OpenAI-compatible messages
-- iOS 6-style navigation, buttons, launch images, and app icons
+- **Google Native API Endpoint Integration**: Direct communication with Google's generative AI API endpoints.
+- **Native Tool Calling Framework**: A lightweight Agentic Harness running on iOS 6, enabling models to perform tool-use and execute tasks dynamically.
+- **Multi-Provider Profiles**: Configure, save, and switch between Google API and OpenAI-compatible providers.
+- **Editable System Prompt**: Customize or clear the system prompt sent before requests.
+- **Local Conversation History**: All data and history remain strictly local on device.
+- **Streamed Output & Thinking Display**: SSE streaming support with temporary reasoning/thinking display and replacement.
+- **Classic iOS 6 UI**: Authentic iOS 6 styling including navigation bars, buttons, launch images, and app icons tailored for retro Apple hardware.
 
-### Build
-
-To install the release build, download the `.deb` from GitHub Releases:
-
-https://github.com/wtfllix/ChatGPT-for-Legacy-iOS/releases/tag/v0.1.0
+### Build & Installation
 
 Install Theos, then build from the app directory:
 
@@ -141,7 +106,7 @@ cd theos/LegacyChatApp
 make package FINALPACKAGE=1
 ```
 
-The generated `.deb` will be placed in:
+The generated `.deb` package will be placed in:
 
 ```sh
 theos/LegacyChatApp/packages/
@@ -149,43 +114,18 @@ theos/LegacyChatApp/packages/
 
 Install the package on a jailbroken iOS 6 device.
 
-### Provider Setup
+### Provider & Tool Calling Setup
 
-Open `Settings > Model Configurations` on device and add a provider:
+Open `Settings > Model Configurations` on device and add your provider:
 
-- `Base URL` should be the provider root, for example `https://api.deepseek.com`.
-- `Chat Path` should be only the endpoint path, for example `/chat/completions`.
-- `Model` should be the exact provider model name.
-- `API Key` is stored locally on device.
+- **Base URL**: Enter the root endpoint address (e.g., for Google API or compatible proxies).
+- **Chat Path**: Enter the API endpoint path.
+- **Model**: Enter the exact model name.
+- **API Key**: Stored securely on device.
+- **Tool Calling**: Configure and enable the native tool-calling framework parameters.
 
-The bundled default provider does not include an API key.
+### Known Limitations
 
-### System Prompt
-
-`Settings > System Prompt` lets users edit or clear the prompt sent before each request. The prompt is inserted into API requests at runtime and is not saved into conversation history.
-
-Default prompt:
-
-```text
-You are a concise, helpful assistant in a legacy iOS chat app. Prefer clear, direct answers. Use simple Markdown only when it improves readability, and avoid complex tables or deeply nested formatting.
-```
-
-### Known Limits
-
-- Portrait is the supported orientation for `0.1.0`.
-- Markdown support is intentionally lightweight, not a full Markdown renderer.
-- Image input depends on provider-side multimodal support.
-- Streaming quality depends on provider SSE behavior and old-device performance.
-- No cloud sync; provider profiles and conversations are local to the device.
-
-### Release Testing
-
-Use the checklist in:
-
-```sh
-theos/LegacyChatApp/RELEASE_CHECKLIST.md
-```
-
-### Repository
-
-https://github.com/wtfllix/ChatGPT-for-Legacy-iOS
+- Optimized for portrait orientation only.
+- Tool calling and agent execution performance depend on model capabilities and legacy hardware limits.
+- No cloud sync; all provider configurations and conversation history are stored locally.
