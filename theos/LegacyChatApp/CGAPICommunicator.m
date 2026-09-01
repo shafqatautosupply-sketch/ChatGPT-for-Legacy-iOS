@@ -1,229 +1,72 @@
 #import "CGAPICommunicator.h"
 #import "CGAPIHelper.h"
 #import "CGMessage.h"
+#import "CGAgentGuardrails.h"
+#import "CGAgentTools.h"
 #import "NSURLConnection+FoundationCompletions.h"
 #import <UIKit/UIKit.h>
-#include "curl.h"
-#include "easy.h"
 
 NSString * const LCAPIResponseNotification = @"LCAPIResponseNotification";
 NSString * const LCAPIMessageDidUpdateNotification = @"LCAPIMessageDidUpdateNotification";
 NSString * const LCAPIStatusDidChangeNotification = @"LCAPIStatusDidChangeNotification";
+NSString * const LCPureChatModeChangedNotification = @"LCPureChatModeChangedNotification";
+NSString * const LCAgentModeChangedNotification = @"LCAgentModeChangedNotification";
+NSString * const LCTerminalModeChangedNotification = @"LCTerminalModeChangedNotification";
+NSString * const LCMarkdownModeChangedNotification = @"LCMarkdownModeChangedNotification";
 
-@interface LCStreamingChatState : NSObject
-
-@property (nonatomic, retain) NSMutableData *bufferedData;
-@property (nonatomic, retain) NSMutableData *completeResponseData;
-@property (nonatomic, retain) NSMutableString *reasoningText;
-@property (nonatomic, retain) NSMutableString *visibleText;
-@property (nonatomic, retain) CGMessage *message;
-@property (nonatomic, assign) BOOL appendedInitialMessage;
-@property (nonatomic, assign) BOOL sawSSEData;
-@property (nonatomic, assign) BOOL showingVisibleText;
-
-- (void)appendBytes:(const void *)bytes length:(size_t)length;
-- (void)finishParsing;
-
-@end
-
-@implementation LCStreamingChatState
-
-@synthesize bufferedData = _bufferedData;
-@synthesize completeResponseData = _completeResponseData;
-@synthesize reasoningText = _reasoningText;
-@synthesize visibleText = _visibleText;
-@synthesize message = _message;
-@synthesize appendedInitialMessage = _appendedInitialMessage;
-@synthesize sawSSEData = _sawSSEData;
-@synthesize showingVisibleText = _showingVisibleText;
-
-- (id)init {
-	self = [super init];
-	if (self) {
-		self.bufferedData = [NSMutableData data];
-		self.completeResponseData = [NSMutableData data];
-		self.reasoningText = [NSMutableString string];
-		self.visibleText = [NSMutableString string];
-	}
-	return self;
-}
-
-- (void)postUpdate {
-	dispatch_async(dispatch_get_main_queue(), ^{
-		[[NSNotificationCenter defaultCenter] postNotificationName:LCAPIMessageDidUpdateNotification object:self.message];
-	});
-}
-
-- (void)ensureInitialMessageIsPosted {
-	if (self.appendedInitialMessage) {
-		return;
-	}
-	self.appendedInitialMessage = YES;
-	dispatch_async(dispatch_get_main_queue(), ^{
-		[[NSNotificationCenter defaultCenter] postNotificationName:LCAPIResponseNotification object:self.message];
-	});
-}
-
-- (void)applyDisplayText {
-	if (self.showingVisibleText) {
-		if ([self.visibleText length] > 0) {
-			self.message.content = self.visibleText;
-		}
-	} else if ([self.reasoningText length] > 0) {
-		self.message.content = self.reasoningText;
-	} else {
-		self.message.content = @"Thinking…";
-	}
-	self.message.hiddenReasoningContent = ([self.reasoningText length] > 0 ? self.reasoningText : nil);
-}
-
-- (void)consumePayloadLine:(NSString *)line {
-	if ([line hasPrefix:@"data:"] == NO) {
-		return;
-	}
-
-	NSString *payload = [[line substringFromIndex:5] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-	if ([payload length] == 0) {
-		return;
-	}
-
-	self.sawSSEData = YES;
-	if ([payload isEqualToString:@"[DONE]"]) {
-		return;
-	}
-
-	NSData *jsonData = [payload dataUsingEncoding:NSUTF8StringEncoding];
-	NSDictionary *dictionary = [NSJSONSerialization JSONObjectWithData:jsonData options:0 error:nil];
-	if (![dictionary isKindOfClass:[NSDictionary class]]) {
-		return;
-	}
-
-	NSArray *choices = [dictionary objectForKey:@"choices"];
-	if (![choices isKindOfClass:[NSArray class]] || [choices count] == 0) {
-		return;
-	}
-
-	NSDictionary *choice = [choices objectAtIndex:0];
-	NSDictionary *delta = [choice objectForKey:@"delta"];
-	if (![delta isKindOfClass:[NSDictionary class]]) {
-		return;
-	}
-
-	NSString *reasoningDelta = nil;
-	NSArray *reasoningKeys = [NSArray arrayWithObjects:@"reasoning_content", @"reasoning", @"thinking", @"think", nil];
-	for (NSString *key in reasoningKeys) {
-		NSString *value = [delta objectForKey:key];
-		if ([value isKindOfClass:[NSString class]] && [value length] > 0) {
-			reasoningDelta = value;
-			break;
-		}
-	}
-
-	NSString *contentDelta = [delta objectForKey:@"content"];
-	if (![contentDelta isKindOfClass:[NSString class]]) {
-		contentDelta = nil;
-	}
-
-	id contentArray = [delta objectForKey:@"content"];
-	if ([contentArray isKindOfClass:[NSArray class]]) {
-		for (NSDictionary *contentItem in (NSArray *)contentArray) {
-			if (![contentItem isKindOfClass:[NSDictionary class]]) {
-				continue;
-			}
-			NSString *itemType = [contentItem objectForKey:@"type"];
-			NSString *text = [contentItem objectForKey:@"text"];
-			if (![text isKindOfClass:[NSString class]] || [text length] == 0) {
-				continue;
-			}
-			if ([itemType isEqualToString:@"reasoning"] || [itemType isEqualToString:@"thinking"]) {
-				reasoningDelta = (reasoningDelta ?: text);
-			} else if ([itemType isEqualToString:@"text"]) {
-				contentDelta = (contentDelta ?: text);
-			}
-		}
-	}
-
-	if ([reasoningDelta length] > 0) {
-		[self.reasoningText appendString:reasoningDelta];
-	}
-	if ([contentDelta length] > 0) {
-		self.showingVisibleText = YES;
-		[self.visibleText appendString:contentDelta];
-	}
-
-	if ([reasoningDelta length] == 0 && [contentDelta length] == 0) {
-		return;
-	}
-
-	[self ensureInitialMessageIsPosted];
-	[self applyDisplayText];
-	[self postUpdate];
-}
-
-- (void)appendBytes:(const void *)bytes length:(size_t)length {
-	if (length == 0) {
-		return;
-	}
-
-	NSData *chunkData = [NSData dataWithBytes:bytes length:length];
-	[self.completeResponseData appendData:chunkData];
-	[self.bufferedData appendData:chunkData];
-
-	while (YES) {
-		const void *bufferBytes = [self.bufferedData bytes];
-		NSUInteger bufferLength = [self.bufferedData length];
-		NSUInteger lineBreakIndex = NSNotFound;
-		for (NSUInteger index = 0; index < bufferLength; index++) {
-			if (((const char *)bufferBytes)[index] == '\n') {
-				lineBreakIndex = index;
-				break;
-			}
-		}
-		if (lineBreakIndex == NSNotFound) {
-			break;
-		}
-
-		NSData *lineData = [self.bufferedData subdataWithRange:NSMakeRange(0, lineBreakIndex)];
-		NSString *line = [[[NSString alloc] initWithData:lineData encoding:NSUTF8StringEncoding] autorelease];
-		if ([line hasSuffix:@"\r"]) {
-			line = [line substringToIndex:[line length] - 1];
-		}
-		[self consumePayloadLine:(line ?: @"")];
-
-		NSRange remainingRange = NSMakeRange(lineBreakIndex + 1, bufferLength - lineBreakIndex - 1);
-		NSData *remainingData = [self.bufferedData subdataWithRange:remainingRange];
-		[self.bufferedData setData:remainingData];
-	}
-}
-
-- (void)finishParsing {
-	if ([self.bufferedData length] > 0) {
-		NSString *line = [[[NSString alloc] initWithData:self.bufferedData encoding:NSUTF8StringEncoding] autorelease];
-		if ([line length] > 0) {
-			[self consumePayloadLine:line];
-		}
-	}
-}
-
-- (void)dealloc {
-	[_bufferedData release];
-	[_completeResponseData release];
-	[_reasoningText release];
-	[_visibleText release];
-	[_message release];
-	[super dealloc];
-}
-
-@end
-
-static size_t LCStreamingWriteCallback(void *ptr, size_t size, size_t nmemb, void *userdata) {
-	size_t realSize = size * nmemb;
-	LCStreamingChatState *state = (LCStreamingChatState *)userdata;
-	[state appendBytes:ptr length:realSize];
-	return realSize;
-}
+static NSString * const LCPureChatModeKey = @"lc_pure_chat_mode_enabled";
+static NSString * const LCAgentModeKey = @"lc_agent_mode_enabled";
+static NSString * const LCTerminalModeKey = @"lc_terminal_mode_enabled";
+static NSString * const LCMarkdownModeKey = @"lc_markdown_mode_enabled";
+static NSString * const LCRequestIntervalKey = @"agent_min_request_interval";
+static BOOL g_isAgentCancelled = NO;
 
 @implementation CGAPICommunicator
+
++ (BOOL)isAgentModeEnabled {
+	NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+	if ([defaults objectForKey:LCAgentModeKey] == nil) {
+		if ([defaults objectForKey:LCPureChatModeKey] != nil) {
+			return ![defaults boolForKey:LCPureChatModeKey];
+		}
+		return YES;
+	}
+	return [defaults boolForKey:LCAgentModeKey];
+}
+
++ (void)setAgentModeEnabled:(BOOL)enabled {
+	NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+	[defaults setBool:enabled forKey:LCAgentModeKey];
+	[defaults setBool:!enabled forKey:LCPureChatModeKey];
+	[defaults synchronize];
+	[[NSNotificationCenter defaultCenter] postNotificationName:LCAgentModeChangedNotification object:[NSNumber numberWithBool:enabled]];
+	[[NSNotificationCenter defaultCenter] postNotificationName:LCPureChatModeChangedNotification object:[NSNumber numberWithBool:!enabled]];
+}
+
++ (BOOL)isPureChatModeEnabled { return ![self isAgentModeEnabled]; }
++ (void)setPureChatModeEnabled:(BOOL)enabled { [self setAgentModeEnabled:!enabled]; }
+
++ (BOOL)isTerminalModeEnabled {
+	NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+	return [defaults objectForKey:LCTerminalModeKey] == nil ? NO : [defaults boolForKey:LCTerminalModeKey];
+}
++ (void)setTerminalModeEnabled:(BOOL)enabled {
+	NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+	[defaults setBool:enabled forKey:LCTerminalModeKey];
+	[defaults synchronize];
+	[[NSNotificationCenter defaultCenter] postNotificationName:LCTerminalModeChangedNotification object:[NSNumber numberWithBool:enabled]];
+}
+
++ (BOOL)isMarkdownEnabled {
+	NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+	return [defaults objectForKey:LCMarkdownModeKey] == nil ? YES : [defaults boolForKey:LCMarkdownModeKey];
+}
++ (void)setMarkdownEnabled:(BOOL)enabled {
+	NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+	[defaults setBool:enabled forKey:LCMarkdownModeKey];
+	[defaults synchronize];
+	[[NSNotificationCenter defaultCenter] postNotificationName:LCMarkdownModeChangedNotification object:[NSNumber numberWithBool:enabled]];
+}
 
 + (void)postStatus:(BOOL)isSending {
 	dispatch_async(dispatch_get_main_queue(), ^{
@@ -232,329 +75,417 @@ static size_t LCStreamingWriteCallback(void *ptr, size_t size, size_t nmemb, voi
 	});
 }
 
-+ (NSString *)textContentFromChoiceMessage:(NSDictionary *)messageDictionary {
-	id content = [messageDictionary objectForKey:@"content"];
-	if ([content isKindOfClass:[NSString class]]) {
-		return content;
-	}
++ (void)cancelCurrentAgentTask { g_isAgentCancelled = YES; [self postStatus:NO]; }
 
-	if (![content isKindOfClass:[NSArray class]]) {
-		return nil;
-	}
++ (NSArray *)agentToolsDefinition {
+	NSDictionary *runShellCommandTool = [NSDictionary dictionaryWithObjectsAndKeys:
+		@"runShellCommand", @"name",
+		@"Execute a terminal shell command locally within the workspace or Theos directory. Strictly protected by Whitelist Guardrails. ALLOWED BINARIES: make, git, clang, cc, c++, dpkg-deb, ldid, echo, cat, ls, cp, mv, mkdir, rm (within workspace/theos only, no wildcards/symlinks), grep, find, tar, zip, unzip, date. Shell chaining (&&, ;, |) and unlisted commands are strictly blocked.", @"description",
+		[NSDictionary dictionaryWithObjectsAndKeys:
+			@"OBJECT", @"type",
+			[NSDictionary dictionaryWithObjectsAndKeys:
+				[NSDictionary dictionaryWithObjectsAndKeys:
+					@"STRING", @"type",
+					@"The allowed single shell command to execute", @"description",
+					nil], @"command",
+				nil], @"properties",
+			[NSArray arrayWithObject:@"command"], @"required",
+			nil], @"parameters",
+		nil];
 
-	NSMutableArray *textFragments = [NSMutableArray array];
-	for (id item in (NSArray *)content) {
-		if (![item isKindOfClass:[NSDictionary class]]) {
-			continue;
-		}
+	NSDictionary *writeFileTool = [NSDictionary dictionaryWithObjectsAndKeys:
+		@"writeFile", @"name",
+		@"Write text content directly to a file within the workspace securely.", @"description",
+		[NSDictionary dictionaryWithObjectsAndKeys:
+			@"OBJECT", @"type",
+			[NSDictionary dictionaryWithObjectsAndKeys:
+				[NSDictionary dictionaryWithObjectsAndKeys:
+					@"STRING", @"type",
+					@"The relative file path inside the workspace", @"description",
+					nil], @"filepath",
+				[NSDictionary dictionaryWithObjectsAndKeys:
+					@"STRING", @"type",
+					@"The exact text content to write into the file", @"description",
+					nil], @"content",
+				nil], @"properties",
+			[NSArray arrayWithObjects:@"filepath", @"content", nil], @"required",
+			nil], @"parameters",
+		nil];
 
-		NSString *text = [item objectForKey:@"text"];
-		if ([text isKindOfClass:[NSString class]] && [text length] > 0) {
-			[textFragments addObject:text];
-		}
-	}
-
-	if ([textFragments count] == 0) {
-		return nil;
-	}
-	return [textFragments componentsJoinedByString:@"\n"];
+	NSArray *declarations = [NSArray arrayWithObjects:runShellCommandTool, writeFileTool, nil];
+	return [NSArray arrayWithObject:[NSDictionary dictionaryWithObject:declarations forKey:@"functionDeclarations"]];
 }
 
-+ (NSString *)textContentFromStreamResponseDictionary:(NSDictionary *)parsedResponse {
-	NSArray *choices = [parsedResponse objectForKey:@"choices"];
-	if (![choices isKindOfClass:[NSArray class]] || [choices count] == 0) {
-		return nil;
-	}
++ (NSDictionary *)payloadDictionaryForMessages:(NSArray *)messages pureChatMode:(BOOL)isPureChat {
+	NSMutableArray *contents = [NSMutableArray array];
+	NSMutableArray *pendingFunctionResponses = [NSMutableArray array];
 
-	NSDictionary *firstChoice = [choices objectAtIndex:0];
-	NSDictionary *messageDictionary = [firstChoice objectForKey:@"message"];
-	if ([messageDictionary isKindOfClass:[NSDictionary class]]) {
-		NSString *messageText = [self textContentFromChoiceMessage:messageDictionary];
-		if ([messageText length] > 0) {
-			return messageText;
-		}
-	}
-
-	NSString *fallbackText = [firstChoice objectForKey:@"text"];
-	return ([fallbackText isKindOfClass:[NSString class]] ? fallbackText : nil);
-}
-
-+ (NSString *)reasoningContentFromChoiceMessage:(NSDictionary *)messageDictionary {
-	NSArray *reasoningKeys = [NSArray arrayWithObjects:@"reasoning_content", @"reasoning", @"thinking", @"think", nil];
-	for (NSString *key in reasoningKeys) {
-		NSString *reasoningText = [messageDictionary objectForKey:key];
-		if ([reasoningText isKindOfClass:[NSString class]] && [reasoningText length] > 0) {
-			return reasoningText;
-		}
-	}
-
-	id content = [messageDictionary objectForKey:@"content"];
-	if (![content isKindOfClass:[NSArray class]]) {
-		return nil;
-	}
-
-	NSMutableArray *reasoningFragments = [NSMutableArray array];
-	for (id item in (NSArray *)content) {
-		if (![item isKindOfClass:[NSDictionary class]]) {
-			continue;
-		}
-		NSString *itemType = [item objectForKey:@"type"];
-		if ([itemType isEqualToString:@"reasoning"] || [itemType isEqualToString:@"thinking"]) {
-			NSString *text = [item objectForKey:@"text"];
-			if ([text isKindOfClass:[NSString class]] && [text length] > 0) {
-				[reasoningFragments addObject:text];
-			}
-		}
-	}
-
-	return ([reasoningFragments count] > 0 ? [reasoningFragments componentsJoinedByString:@"\n"] : nil);
-}
-
-+ (NSDictionary *)payloadDictionaryForMessages:(NSArray *)messages {
-	NSMutableArray *serializedMessages = [NSMutableArray array];
-	NSString *systemPrompt = [CGAPIHelper configuredSystemPrompt];
-	if ([systemPrompt length] > 0) {
-		[serializedMessages addObject:[NSDictionary dictionaryWithObjectsAndKeys:
-			@"system", @"role",
-			systemPrompt, @"content",
-			nil]];
-	}
-
-	for (CGMessage *message in messages) {
-		if (![message isKindOfClass:[CGMessage class]]) {
-			continue;
-		}
-
-		NSString *role = message.role;
-		if (![role isEqualToString:@"user"] && ![role isEqualToString:@"assistant"] && ![role isEqualToString:@"system"]) {
-			continue;
-		}
-
-		NSString *content = [message.content stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-		if ([content length] == 0 && message.imageAttachment == nil) {
-			continue;
-		}
-
-		NSMutableDictionary *serializedMessage = [NSMutableDictionary dictionaryWithObjectsAndKeys:role, @"role", nil];
-		if (message.imageAttachment != nil) {
-			NSMutableArray *contentItems = [NSMutableArray array];
-			if ([content length] > 0) {
-				[contentItems addObject:[NSDictionary dictionaryWithObjectsAndKeys:
-					@"text", @"type",
-					content, @"text",
+	for (id message in messages) {
+		if ([message isKindOfClass:[NSDictionary class]]) {
+			if ([pendingFunctionResponses count] > 0) {
+				[contents addObject:[NSDictionary dictionaryWithObjectsAndKeys:
+					@"user", @"role",
+					[NSArray arrayWithArray:pendingFunctionResponses], @"parts",
 					nil]];
+				[pendingFunctionResponses removeAllObjects];
 			}
+			[contents addObject:message];
+		} else if ([message isKindOfClass:[CGMessage class]]) {
+			CGMessage *msg = (CGMessage *)message;
+			NSString *role = msg.role;
+			NSString *content = [msg.content stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
 
-			NSString *base64Image = [CGAPIHelper base64StringForImage:message.imageAttachment];
-			if ([base64Image length] > 0) {
-				[contentItems addObject:[NSDictionary dictionaryWithObjectsAndKeys:
-					@"image_url", @"type",
-					[NSDictionary dictionaryWithObjectsAndKeys:
-						[NSString stringWithFormat:@"data:image/jpeg;base64,%@", base64Image], @"url",
-						nil], @"image_url",
-					nil]];
-			}
+			if ([role isEqualToString:@"system"]) continue;
 
-			if ([contentItems count] == 0) {
+			if ([role isEqualToString:@"tool"]) {
+				NSDictionary *responseDict = [NSDictionary dictionaryWithObject:(content ?: @"") forKey:@"output"];
+				NSDictionary *funcResponse = [NSDictionary dictionaryWithObjectsAndKeys:
+					(msg.toolName ?: @"tool"), @"name",
+					responseDict, @"response",
+					nil];
+				[pendingFunctionResponses addObject:[NSDictionary dictionaryWithObject:funcResponse forKey:@"functionResponse"]];
 				continue;
 			}
-			[serializedMessage setObject:contentItems forKey:@"content"];
-		} else {
-			[serializedMessage setObject:content forKey:@"content"];
-		}
 
-		[serializedMessages addObject:serializedMessage];
+			if ([pendingFunctionResponses count] > 0) {
+				[contents addObject:[NSDictionary dictionaryWithObjectsAndKeys:
+					@"user", @"role",
+					[NSArray arrayWithArray:pendingFunctionResponses], @"parts",
+					nil]];
+				[pendingFunctionResponses removeAllObjects];
+			}
+
+			NSString *geminiRole = @"user";
+			if ([role isEqualToString:@"assistant"]) {
+				geminiRole = @"model";
+			}
+
+			NSMutableArray *parts = [NSMutableArray array];
+
+			if ([msg.toolCalls count] > 0 && !isPureChat) {
+				for (NSDictionary *tc in msg.toolCalls) {
+					NSDictionary *fn = [tc objectForKey:@"function"];
+					NSString *fnName = [fn objectForKey:@"name"];
+					NSString *argsStr = [fn objectForKey:@"arguments"];
+					NSDictionary *argsDict = nil;
+					if ([argsStr isKindOfClass:[NSString class]]) {
+						argsDict = [NSJSONSerialization JSONObjectWithData:[argsStr dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+					}
+					
+					NSMutableDictionary *fcDict = [NSMutableDictionary dictionaryWithObjectsAndKeys:
+						(fnName ?: @""), @"name",
+						(argsDict ?: [NSDictionary dictionary]), @"args",
+						nil];
+
+					id thoughtSig = [tc objectForKey:@"thoughtSignature"] ?: [tc objectForKey:@"thought_signature"] ?: [tc objectForKey:@"extra_content"];
+					NSMutableDictionary *partDict = [NSMutableDictionary dictionaryWithObject:fcDict forKey:@"functionCall"];
+					if (thoughtSig != nil) {
+						[partDict setObject:thoughtSig forKey:@"thoughtSignature"];
+					}
+					[parts addObject:partDict];
+				}
+			}
+
+			if ([content length] > 0) {
+				[parts addObject:[NSDictionary dictionaryWithObject:content forKey:@"text"]];
+			}
+
+			if ([parts count] > 0) {
+				[contents addObject:[NSDictionary dictionaryWithObjectsAndKeys:
+					geminiRole, @"role",
+					parts, @"parts",
+					nil]];
+			}
+		}
 	}
 
-	return [NSDictionary dictionaryWithObjectsAndKeys:
-		[CGAPIHelper configuredChatModel], @"model",
-		serializedMessages, @"messages",
+	if ([pendingFunctionResponses count] > 0) {
+		[contents addObject:[NSDictionary dictionaryWithObjectsAndKeys:
+			@"user", @"role",
+			[NSArray arrayWithArray:pendingFunctionResponses], @"parts",
+			nil]];
+		[pendingFunctionResponses removeAllObjects];
+	}
+
+	NSMutableDictionary *payload = [NSMutableDictionary dictionaryWithObjectsAndKeys:
+		contents, @"contents",
 		nil];
+
+	NSString *systemPrompt = [CGAPIHelper configuredSystemPrompt];
+	if ([systemPrompt length] > 0) {
+		NSDictionary *sysInst = [NSDictionary dictionaryWithObject:
+			[NSArray arrayWithObject:[NSDictionary dictionaryWithObject:systemPrompt forKey:@"text"]]
+			forKey:@"parts"];
+		[payload setObject:sysInst forKey:@"system_instruction"];
+	}
+
+	if (!isPureChat) {
+		[payload setObject:[self agentToolsDefinition] forKey:@"tools"];
+		NSDictionary *thinkingConfig = [NSDictionary dictionaryWithObject:@"HIGH" forKey:@"thinkingLevel"];
+		NSDictionary *genConfig = [NSDictionary dictionaryWithObject:thinkingConfig forKey:@"thinkingConfig"];
+		[payload setObject:genConfig forKey:@"generationConfig"];
+	}
+
+	return payload;
 }
 
-+ (void)postUpdatedMessage:(CGMessage *)message {
-	dispatch_async(dispatch_get_main_queue(), ^{
-		[[NSNotificationCenter defaultCenter] postNotificationName:LCAPIMessageDidUpdateNotification object:message];
-	});
-}
-
-+ (void)postMessageText:(NSString *)text assistantRole:(NSString *)role {
-	CGMessage *message = [role isEqualToString:@"assistant"] ? [CGAPIHelper assistantMessageWithText:text] : [CGAPIHelper localMessageWithText:text];
++ (void)postMessageText:(NSString *__nullable)text assistantRole:(NSString *)role {
+	CGMessage *message = [role isEqualToString:@"assistant"] ? [CGAPIHelper assistantMessageWithText:text] : [CGMessage localMessageWithText:text];
 	dispatch_async(dispatch_get_main_queue(), ^{
 		[[NSNotificationCenter defaultCenter] postNotificationName:LCAPIResponseNotification object:message];
 	});
 }
 
++ (NSString *)workspaceDirectory {
+	NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+	NSString *savedWorkspace = [defaults stringForKey:@"agent_workspace_dir"];
+	if ([savedWorkspace length] > 0) {
+		NSFileManager *fm = [NSFileManager defaultManager];
+		if (![fm fileExistsAtPath:savedWorkspace]) {
+			[fm createDirectoryAtPath:savedWorkspace withIntermediateDirectories:YES attributes:nil error:nil];
+		}
+		return savedWorkspace;
+	}
+	NSString *sandboxPath = @"/var/mobile/Documents/SandBox";
+	NSFileManager *fm = [NSFileManager defaultManager];
+	if (![fm fileExistsAtPath:sandboxPath]) {
+		[fm createDirectoryAtPath:sandboxPath withIntermediateDirectories:YES attributes:nil error:nil];
+	}
+	return sandboxPath;
+}
+
 + (void)createChatCompletionWithMessages:(NSArray *)messages {
+	g_isAgentCancelled = NO;
 	[self postStatus:YES];
 
+	BOOL isPureChat = [self isPureChatModeEnabled];
+
 	dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-		NSString *apiKey = [CGAPIHelper currentAPIKey];
-		if ([apiKey length] == 0) {
-			[self postMessageText:@"API key is missing. Edit ProviderConfig.plist before packaging, or write apiKey into the app preferences plist on device." assistantRole:@"local"];
-			[self postStatus:NO];
-			return;
-		}
+		__block NSMutableArray *currentMessages = [NSMutableArray arrayWithArray:messages];
+		static NSTimeInterval lastRequestTime = 0;
 
-		NSDictionary *payload = [self payloadDictionaryForMessages:messages];
-		if ([[payload objectForKey:@"messages"] count] == 0) {
-			[self postMessageText:@"There is nothing to send yet. Please enter a message first." assistantRole:@"local"];
-			[self postStatus:NO];
-			return;
-		}
+		while (!g_isAgentCancelled) {
+			NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+			NSTimeInterval minInterval = 5.0;
+			id intervalObj = [defaults objectForKey:LCRequestIntervalKey];
+			if (intervalObj != nil) minInterval = [intervalObj doubleValue];
 
-		NSError *jsonError = nil;
-		NSMutableDictionary *streamingPayload = [NSMutableDictionary dictionaryWithDictionary:payload];
-		[streamingPayload setObject:[NSNumber numberWithBool:YES] forKey:@"stream"];
-		NSData *streamBodyData = [NSJSONSerialization dataWithJSONObject:streamingPayload options:0 error:&jsonError];
-		if (jsonError == nil && streamBodyData != nil) {
-			NSMutableURLRequest *streamRequest = [[[NSMutableURLRequest alloc] initWithURL:[CGAPIHelper configuredChatCompletionURL]] autorelease];
-			[streamRequest setHTTPMethod:@"POST"];
-			[streamRequest setHTTPBody:streamBodyData];
-			[CGAPIHelper applyAuthorizationHeadersToRequest:streamRequest withAPIKey:apiKey];
-
-			struct curl_slist *headerList = NULL;
-			CURL *curlHandle = curl_easy_init();
-			if (curlHandle != NULL) {
-				LCStreamingChatState *streamState = [[[LCStreamingChatState alloc] init] autorelease];
-				streamState.message = [[CGAPIHelper assistantMessageWithText:@""] retain];
-
-				curl_easy_setopt(curlHandle, CURLOPT_URL, [[[streamRequest URL] absoluteString] UTF8String]);
-				curl_easy_setopt(curlHandle, CURLOPT_FOLLOWLOCATION, 1L);
-				curl_easy_setopt(curlHandle, CURLOPT_SSL_VERIFYPEER, 0L);
-				curl_easy_setopt(curlHandle, CURLOPT_NOSIGNAL, 1L);
-				curl_easy_setopt(curlHandle, CURLOPT_POSTFIELDS, [streamBodyData bytes]);
-				curl_easy_setopt(curlHandle, CURLOPT_POSTFIELDSIZE, [streamBodyData length]);
-				curl_easy_setopt(curlHandle, CURLOPT_WRITEFUNCTION, LCStreamingWriteCallback);
-				curl_easy_setopt(curlHandle, CURLOPT_WRITEDATA, streamState);
-
-				NSDictionary *headers = [streamRequest allHTTPHeaderFields];
-				for (NSString *headerKey in [headers allKeys]) {
-					NSString *headerValue = [headers objectForKey:headerKey];
-					headerList = curl_slist_append(headerList, [[NSString stringWithFormat:@"%@: %@", headerKey, headerValue] UTF8String]);
+			if (minInterval > 0) {
+				NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+				NSTimeInterval elapsed = now - lastRequestTime;
+				if (elapsed < minInterval) {
+					NSTimeInterval sleepDuration = minInterval - elapsed;
+					if (sleepDuration > 0 && sleepDuration < 60) [NSThread sleepForTimeInterval:sleepDuration];
 				}
-				if (headerList != NULL) {
-					curl_easy_setopt(curlHandle, CURLOPT_HTTPHEADER, headerList);
+			}
+
+			if (g_isAgentCancelled) { [self postStatus:NO]; return; }
+			lastRequestTime = [[NSDate date] timeIntervalSince1970];
+
+			NSString *apiKey = [CGAPIHelper currentAPIKey];
+			if ([apiKey length] == 0) {
+				[self postMessageText:@"API key is missing." assistantRole:@"assistant"];
+				[self postStatus:NO];
+				return;
+			}
+
+			NSDictionary *payload = [self payloadDictionaryForMessages:currentMessages pureChatMode:isPureChat];
+			NSError *jsonError = nil;
+			NSData *bodyData = [NSJSONSerialization dataWithJSONObject:payload options:0 error:&jsonError];
+			if (jsonError != nil || bodyData == nil) {
+				[self postMessageText:@"Failed to encode request payload." assistantRole:@"assistant"];
+				[self postStatus:NO];
+				return;
+			}
+
+			NSMutableURLRequest *request = [[[NSMutableURLRequest alloc] initWithURL:[CGAPIHelper configuredChatCompletionURL]] autorelease];
+			[request setHTTPMethod:@"POST"];
+			[request setHTTPBody:bodyData];
+			[request setTimeoutInterval:60.0];
+			[CGAPIHelper applyAuthorizationHeadersToRequest:request withAPIKey:apiKey];
+
+			NSURLResponse *response = nil;
+			NSError *requestError = nil;
+			NSData *responseData = [NSURLConnection sendSynchronousRequest:request returningResponse:&response error:&requestError];
+			if (g_isAgentCancelled) { [self postStatus:NO]; return; }
+
+			if (responseData == nil || requestError != nil) {
+				NSString *rawError = [CGAPIHelper extractErrorMessageFromResponseData:responseData fallback:[requestError localizedDescription] ?: @"Network connection error"];
+				[self postMessageText:rawError assistantRole:@"assistant"];
+				[self postStatus:NO];
+				return;
+			}
+
+			NSHTTPURLResponse *httpResponse = (NSHTTPURLResponse *)response;
+			if ([httpResponse respondsToSelector:@selector(statusCode)] && [httpResponse statusCode] != 200) {
+				NSString *cleanError = [CGAPIHelper extractErrorMessageFromResponseData:responseData fallback:@"HTTP error encountered"];
+				[self postMessageText:cleanError assistantRole:@"assistant"];
+				[self postStatus:NO];
+				return;
+			}
+
+			NSDictionary *parsedResponse = [NSJSONSerialization JSONObjectWithData:responseData options:0 error:&jsonError];
+			if (jsonError != nil || ![parsedResponse isKindOfClass:[NSDictionary class]]) {
+				[self postMessageText:@"Invalid JSON response" assistantRole:@"assistant"];
+				[self postStatus:NO];
+				return;
+			}
+
+			NSDictionary *errorDictionary = [parsedResponse objectForKey:@"error"];
+			if ([errorDictionary isKindOfClass:[NSDictionary class]]) {
+				NSString *errMsg = [errorDictionary objectForKey:@"message"] ?: @"API Error encountered";
+				[self postMessageText:errMsg assistantRole:@"assistant"];
+				[self postStatus:NO];
+				return;
+			}
+
+			NSArray *candidates = [parsedResponse objectForKey:@"candidates"];
+			if (![candidates isKindOfClass:[NSArray class]] || [candidates count] == 0) {
+				NSDictionary *promptFeedback = [parsedResponse objectForKey:@"promptFeedback"];
+				NSString *errDescription = promptFeedback ? [NSString stringWithFormat:@"Prompt Feedback: %@", promptFeedback] : [NSString stringWithFormat:@"No candidates returned. Raw response: %@", parsedResponse];
+				[self postMessageText:errDescription assistantRole:@"assistant"];
+				[self postStatus:NO];
+				return;
+			}
+
+			NSDictionary *firstCandidate = [candidates objectAtIndex:0];
+			NSDictionary *contentDict = [firstCandidate objectForKey:@"content"];
+			NSArray *parts = [contentDict objectForKey:@"parts"];
+
+			NSString *responseText = @"";
+			NSMutableArray *toolCalls = [NSMutableArray array];
+
+			for (NSDictionary *part in parts) {
+				id textObj = [part objectForKey:@"text"];
+				if ([textObj isKindOfClass:[NSString class]]) {
+					responseText = [responseText length] > 0 ? [responseText stringByAppendingString:textObj] : textObj;
 				}
 
-				int curlResult = curl_easy_perform(curlHandle);
-				[streamState finishParsing];
-
-				if (headerList != NULL) {
-					curl_slist_free_all(headerList);
+				id thoughtObj = [part objectForKey:@"thought"];
+				if ([thoughtObj isKindOfClass:[NSString class]]) {
+					responseText = [responseText length] > 0 ? [responseText stringByAppendingFormat:@"\n[Thought: %@]", thoughtObj] : [NSString stringWithFormat:@"[Thought: %@]", thoughtObj];
 				}
-				curl_easy_cleanup(curlHandle);
 
-				if (curlResult == 0 && streamState.sawSSEData) {
-					if ([streamState.visibleText length] == 0 && [streamState.reasoningText length] > 0) {
-						streamState.message.content = streamState.reasoningText;
-					} else if ([streamState.visibleText length] > 0) {
-						streamState.message.content = streamState.visibleText;
+				NSDictionary *fc = [part objectForKey:@"functionCall"] ?: [part objectForKey:@"function_call"];
+				if ([fc isKindOfClass:[NSDictionary class]]) {
+					NSString *fnName = [fc objectForKey:@"name"];
+					NSDictionary *args = [fc objectForKey:@"args"] ?: [fc objectForKey:@"arguments"];
+					NSData *argsData = [NSJSONSerialization dataWithJSONObject:(args ?: [NSDictionary dictionary]) options:0 error:nil];
+					NSString *argsString = [[[NSString alloc] initWithData:argsData encoding:NSUTF8StringEncoding] autorelease];
+
+					NSString *callID = [fc objectForKey:@"id"] ?: [NSString stringWithFormat:@"call_%u", arc4random() % 100000];
+
+					NSMutableDictionary *toolCallEntry = [NSMutableDictionary dictionaryWithObjectsAndKeys:
+						callID, @"id",
+						@"function", @"type",
+						[NSDictionary dictionaryWithObjectsAndKeys:
+							fnName, @"name",
+							argsString, @"arguments",
+							nil], @"function",
+						nil];
+
+					id thoughtSig = [part objectForKey:@"thoughtSignature"] ?: [part objectForKey:@"thought_signature"] ?: [fc objectForKey:@"thoughtSignature"] ?: [fc objectForKey:@"thought_signature"];
+					if (thoughtSig != nil) {
+						[toolCallEntry setObject:thoughtSig forKey:@"thoughtSignature"];
 					}
-					if (streamState.appendedInitialMessage) {
-						streamState.message.hiddenReasoningContent = ([streamState.reasoningText length] > 0 ? streamState.reasoningText : nil);
-						[self postUpdatedMessage:streamState.message];
-					}
-					[self postStatus:NO];
-					return;
-				}
 
-				if ([streamState.completeResponseData length] > 0 && !streamState.sawSSEData) {
-					NSDictionary *streamResponse = [NSJSONSerialization JSONObjectWithData:streamState.completeResponseData options:0 error:nil];
-					NSString *streamResponseText = nil;
-					if ([streamResponse isKindOfClass:[NSDictionary class]]) {
-						streamResponseText = [self textContentFromStreamResponseDictionary:streamResponse];
+					[toolCalls addObject:toolCallEntry];
+				}
+			}
+
+			CGMessage *assistantMessage = [[[CGMessage alloc] init] autorelease];
+			assistantMessage.author = [CGAPIHelper providerDisplayName];
+			assistantMessage.role = @"assistant";
+			assistantMessage.type = 2;
+			
+			if ([responseText length] > 0) {
+				assistantMessage.content = responseText;
+			} else if ([toolCalls count] > 0) {
+				NSMutableArray *callDescs = [NSMutableArray array];
+				for (NSDictionary *tc in toolCalls) {
+					NSDictionary *fn = [tc objectForKey:@"function"];
+					NSString *name = [fn objectForKey:@"name"] ?: @"tool";
+					NSString *args = [fn objectForKey:@"arguments"] ?: @"";
+					[callDescs addObject:[NSString stringWithFormat:@"Tool Call: %@\nArguments: %@", name, args]];
+				}
+				assistantMessage.content = [callDescs componentsJoinedByString:@"\n\n"];
+			} else {
+				assistantMessage.content = [NSString stringWithFormat:@"[Received empty response parts. Raw candidate: %@]", firstCandidate];
+			}
+
+            assistantMessage.toolCalls = toolCalls;
+			assistantMessage.indestructible = YES;
+			assistantMessage.avatar = [UIImage imageNamed:@"Images/defaultAssistantAvatar.png"];
+
+			[currentMessages addObject:assistantMessage];
+
+			dispatch_async(dispatch_get_main_queue(), ^{
+				if (!g_isAgentCancelled) {
+					[[NSNotificationCenter defaultCenter] postNotificationName:LCAPIResponseNotification object:assistantMessage];
+				}
+			});
+
+			if (isPureChat || [toolCalls count] == 0) {
+				[self postStatus:NO];
+				break;
+			} else {
+				if (g_isAgentCancelled) { [self postStatus:NO]; return; }
+
+				for (NSDictionary *toolCall in toolCalls) {
+					if (g_isAgentCancelled) break;
+
+					NSString *toolCallID = [toolCall objectForKey:@"id"];
+					NSDictionary *functionDict = [toolCall objectForKey:@"function"];
+					NSString *funcName = [functionDict objectForKey:@"name"];
+					NSString *argumentsString = [functionDict objectForKey:@"arguments"];
+
+					NSDictionary *arguments = nil;
+					if ([argumentsString isKindOfClass:[NSString class]]) {
+						arguments = [NSJSONSerialization JSONObjectWithData:[argumentsString dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
 					}
-					if ([streamResponseText length] > 0) {
-						NSString *streamReasoningText = nil;
-						NSArray *choices = [streamResponse objectForKey:@"choices"];
-						if ([choices isKindOfClass:[NSArray class]] && [choices count] > 0) {
-							NSDictionary *firstChoice = [choices objectAtIndex:0];
-							NSDictionary *messageDictionary = [firstChoice objectForKey:@"message"];
-							if ([messageDictionary isKindOfClass:[NSDictionary class]]) {
-								streamReasoningText = [self reasoningContentFromChoiceMessage:messageDictionary];
-							}
+
+					NSString *toolOutput = @"";
+					NSString *workspaceDir = [self workspaceDirectory];
+
+					if ([funcName isEqualToString:@"runShellCommand"]) {
+						NSString *command = [arguments objectForKey:@"command"];
+						toolOutput = [CGAgentTools executeShellCommand:command workspaceDirectory:workspaceDir];
+					} else if ([funcName isEqualToString:@"writeFile"]) {
+						NSString *filepath = [arguments objectForKey:@"filepath"];
+						NSString *content = [arguments objectForKey:@"content"];
+						toolOutput = [CGAgentTools writeFileAtPath:filepath content:content workspaceDirectory:workspaceDir];
+					} else {
+						toolOutput = [NSString stringWithFormat:@"Error: Unknown tool function '%@'", funcName];
+					}
+
+					if ([toolOutput length] > 4000) {
+						toolOutput = [NSString stringWithFormat:@"%@\n[Output truncated]", [toolOutput substringToIndex:4000]];
+					}
+
+					CGMessage *toolMessage = [[[CGMessage alloc] init] autorelease];
+					toolMessage.author = @"Tool Output";
+					toolMessage.role = @"tool";
+					toolMessage.toolCallID = toolCallID;
+					toolMessage.toolName = funcName;
+					toolMessage.content = (toolOutput ?: @"") ;
+					toolMessage.indestructible = YES;
+					toolMessage.avatar = [UIImage imageNamed:@"Images/defaultAssistantAvatar.png"];
+					[currentMessages addObject:toolMessage];
+
+					dispatch_async(dispatch_get_main_queue(), ^{
+						if (!g_isAgentCancelled) {
+							[[NSNotificationCenter defaultCenter] postNotificationName:LCAPIResponseNotification object:toolMessage];
 						}
-						CGMessage *assistantMessage = [CGAPIHelper assistantMessageWithText:streamResponseText];
-						assistantMessage.hiddenReasoningContent = streamReasoningText;
-						dispatch_async(dispatch_get_main_queue(), ^{
-							[[NSNotificationCenter defaultCenter] postNotificationName:LCAPIResponseNotification object:assistantMessage];
-						});
-						[self postStatus:NO];
-						return;
-					}
+					});
+
+					[NSThread sleepForTimeInterval:0.04];
 				}
+
+				if (g_isAgentCancelled) { [self postStatus:NO]; return; }
+				continue;
 			}
 		}
 
-		NSData *bodyData = [NSJSONSerialization dataWithJSONObject:payload options:0 error:&jsonError];
-		if (jsonError != nil || bodyData == nil) {
-			[self postMessageText:@"The request body could not be encoded. Please try a shorter message first." assistantRole:@"local"];
-			[self postStatus:NO];
-			return;
-		}
-
-		NSMutableURLRequest *request = [[[NSMutableURLRequest alloc] initWithURL:[CGAPIHelper configuredChatCompletionURL]] autorelease];
-		[request setHTTPMethod:@"POST"];
-		[request setHTTPBody:bodyData];
-		[CGAPIHelper applyAuthorizationHeadersToRequest:request withAPIKey:apiKey];
-
-		NSURLResponse *response = nil;
-		NSError *requestError = nil;
-		NSData *responseData = [NSURLConnection sendSynchronousRequest:request returningResponse:&response error:&requestError];
-		if (responseData == nil || requestError != nil) {
-			NSString *errorText = [CGAPIHelper extractErrorMessageFromResponseData:responseData fallback:@"The configured provider could not be reached. Please verify your base URL, API key, and network connection."];
-			[self postMessageText:errorText assistantRole:@"local"];
-			[self postStatus:NO];
-			return;
-		}
-
-		NSDictionary *parsedResponse = [NSJSONSerialization JSONObjectWithData:responseData options:0 error:&jsonError];
-		if (jsonError != nil || ![parsedResponse isKindOfClass:[NSDictionary class]]) {
-			[self postMessageText:@"The provider returned a response that this build could not parse yet." assistantRole:@"local"];
-			[self postStatus:NO];
-			return;
-		}
-
-		NSDictionary *errorDictionary = [parsedResponse objectForKey:@"error"];
-		if ([errorDictionary isKindOfClass:[NSDictionary class]]) {
-			NSString *errorText = [CGAPIHelper extractErrorMessageFromResponseData:responseData fallback:@"The provider returned an unknown error."];
-			[self postMessageText:errorText assistantRole:@"local"];
-			[self postStatus:NO];
-			return;
-		}
-
-		NSArray *choices = [parsedResponse objectForKey:@"choices"];
-		if (![choices isKindOfClass:[NSArray class]] || [choices count] == 0) {
-			[self postMessageText:@"The provider responded without any choices." assistantRole:@"local"];
-			[self postStatus:NO];
-			return;
-		}
-
-		NSDictionary *firstChoice = [choices objectAtIndex:0];
-		NSDictionary *messageDictionary = [firstChoice objectForKey:@"message"];
-		NSString *responseText = nil;
-		NSString *reasoningText = nil;
-		if ([messageDictionary isKindOfClass:[NSDictionary class]]) {
-			responseText = [self textContentFromChoiceMessage:messageDictionary];
-			reasoningText = [self reasoningContentFromChoiceMessage:messageDictionary];
-		}
-
-		if ([responseText length] == 0) {
-			responseText = [firstChoice objectForKey:@"text"];
-		}
-
-		if (![responseText isKindOfClass:[NSString class]] || [responseText length] == 0) {
-			[self postMessageText:@"The provider returned an empty reply." assistantRole:@"local"];
-			[self postStatus:NO];
-			return;
-		}
-
-		CGMessage *assistantMessage = [CGAPIHelper assistantMessageWithText:responseText];
-		assistantMessage.hiddenReasoningContent = reasoningText;
-		dispatch_async(dispatch_get_main_queue(), ^{
-			[[NSNotificationCenter defaultCenter] postNotificationName:LCAPIResponseNotification object:assistantMessage];
-		});
 		[self postStatus:NO];
 	});
 }

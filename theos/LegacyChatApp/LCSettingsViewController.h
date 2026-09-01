@@ -1,5 +1,5 @@
 #import <UIKit/UIKit.h>
 
-@interface LCSettingsViewController : UITableViewController <UITextFieldDelegate>
+@interface LCSettingsViewController : UITableViewController <UITextFieldDelegate, UIAlertViewDelegate>
 
 @end

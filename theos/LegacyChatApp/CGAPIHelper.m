@@ -1,14 +1,32 @@
 #import "CGAPIHelper.h"
 #import "CGMessage.h"
+#import "CGAPICommunicator.h"
+
+@interface NSData (CGBase64)
+- (NSString *)base64Encoding;
+@end
 
 static NSString * const LCProviderProfilesKey = @"providerProfiles";
 static NSString * const LCActiveProviderProfileIDKey = @"activeProviderProfileID";
 static NSString * const LCSystemPromptKey = @"systemPrompt";
 
+static NSDictionary *cachedActiveProfile = nil;
+static NSArray *cachedProfiles = nil;
+static NSString *cachedSystemPrompt = nil;
+
 @implementation CGAPIHelper
 
++ (void)invalidateMemoryCache {
+	[cachedActiveProfile release];
+	cachedActiveProfile = nil;
+	[cachedProfiles release];
+	cachedProfiles = nil;
+	[cachedSystemPrompt release];
+	cachedSystemPrompt = nil;
+}
+
 + (NSString *)defaultSystemPrompt {
-	return @"You are a concise, helpful assistant in a legacy iOS chat app. Prefer clear, direct answers. Use simple Markdown only when it improves readability, and avoid complex tables or deeply nested formatting.";
+	return @"You are a concise, helpful assistant in a legacy iOS app. Prefer clear, direct answers. When searching for or modifying files via shell commands, if a relative path fails or you are unsure of the directory structure, automatically run `find . -name '<filename>'` or `ls` first to locate files before grepping or reading them.";
 }
 
 + (NSString *)stringByStrippingThinkBlocks:(NSString *)value extractedReasoning:(NSString **)reasoningOutput {
@@ -42,56 +60,39 @@ static NSString * const LCSystemPromptKey = @"systemPrompt";
 	if (![value isKindOfClass:[NSString class]] || [value length] == 0) {
 		return @"";
 	}
-
-	NSMutableString *normalized = [NSMutableString stringWithString:value];
-	NSArray *replacements = [NSArray arrayWithObjects:
-		[NSArray arrayWithObjects:@"```", @"", nil],
-		[NSArray arrayWithObjects:@"**", @"", nil],
-		[NSArray arrayWithObjects:@"__", @"", nil],
-		[NSArray arrayWithObjects:@"`", @"", nil],
-		nil];
-	for (NSArray *replacementPair in replacements) {
-		[normalized replaceOccurrencesOfString:[replacementPair objectAtIndex:0]
-		                            withString:[replacementPair objectAtIndex:1]
-		                               options:0
-		                                 range:NSMakeRange(0, [normalized length])];
-	}
-
-	NSRegularExpression *headerRegex = [NSRegularExpression regularExpressionWithPattern:@"(?m)^#{1,6}\\s*" options:0 error:nil];
-	[headerRegex replaceMatchesInString:normalized options:0 range:NSMakeRange(0, [normalized length]) withTemplate:@""];
-
-	NSRegularExpression *listRegex = [NSRegularExpression regularExpressionWithPattern:@"(?m)^(\\s*)[-\\*+]\\s+" options:0 error:nil];
-	[listRegex replaceMatchesInString:normalized options:0 range:NSMakeRange(0, [normalized length]) withTemplate:@"$1• "];
-
-	NSRegularExpression *linkRegex = [NSRegularExpression regularExpressionWithPattern:@"\\[([^\\]]+)\\]\\(([^\\)]+)\\)" options:0 error:nil];
-	[linkRegex replaceMatchesInString:normalized options:0 range:NSMakeRange(0, [normalized length]) withTemplate:@"$1"];
-
-	NSRegularExpression *italicRegex = [NSRegularExpression regularExpressionWithPattern:@"(?<!\\*)\\*([^\\*]+)\\*(?!\\*)" options:0 error:nil];
-	[italicRegex replaceMatchesInString:normalized options:0 range:NSMakeRange(0, [normalized length]) withTemplate:@"$1"];
-
-	NSRegularExpression *underscoreItalicRegex = [NSRegularExpression regularExpressionWithPattern:@"(?<!_)_([^_]+)_(?!_)" options:0 error:nil];
-	[underscoreItalicRegex replaceMatchesInString:normalized options:0 range:NSMakeRange(0, [normalized length]) withTemplate:@"$1"];
-
+	NSString *normalized = [value stringByReplacingOccurrencesOfString:@"\\n" withString:@"\n"];
+	normalized = [normalized stringByReplacingOccurrencesOfString:@"\\t" withString:@"\t"];
 	return [normalized stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
 }
 
 + (void)applyMarkdownAttributesToAttributedString:(NSMutableAttributedString *)attributedString {
+	if (![CGAPICommunicator isMarkdownEnabled]) {
+		return;
+	}
+
 	NSString *fullText = [attributedString string];
 	if ([fullText length] == 0) {
 		return;
 	}
 
-	NSRegularExpression *strongRegex = [NSRegularExpression regularExpressionWithPattern:@"(\\*\\*|__)(.+?)(\\1)" options:NSRegularExpressionDotMatchesLineSeparators error:nil];
-	NSArray *strongMatches = [strongRegex matchesInString:fullText options:0 range:NSMakeRange(0, [fullText length])];
-	for (NSInteger index = [strongMatches count] - 1; index >= 0; index--) {
-		NSTextCheckingResult *match = [strongMatches objectAtIndex:index];
-		NSRange contentRange = [match rangeAtIndex:2];
+	// 1. Triple-backtick code blocks: ```language ... ```
+	NSRegularExpression *codeBlockRegex = [NSRegularExpression regularExpressionWithPattern:@"```[a-zA-Z]*\\n([\\s\\S]*?)```" options:0 error:nil];
+	NSArray *codeBlockMatches = [codeBlockRegex matchesInString:fullText options:0 range:NSMakeRange(0, [fullText length])];
+	for (NSInteger index = [codeBlockMatches count] - 1; index >= 0; index--) {
+		NSTextCheckingResult *match = [codeBlockMatches objectAtIndex:index];
+		NSRange contentRange = [match rangeAtIndex:1];
 		NSString *matchedText = [fullText substringWithRange:contentRange];
-		NSAttributedString *replacement = [[[NSAttributedString alloc] initWithString:matchedText attributes:[NSDictionary dictionaryWithObject:[UIFont boldSystemFontOfSize:15.0f] forKey:NSFontAttributeName]] autorelease];
+		NSDictionary *attributes = [NSDictionary dictionaryWithObjectsAndKeys:
+			[UIFont fontWithName:@"Courier" size:13.0f], NSFontAttributeName,
+			[UIColor colorWithWhite:0.15f alpha:1.0f], NSForegroundColorAttributeName,
+			nil];
+		NSAttributedString *replacement = [[[NSAttributedString alloc] initWithString:matchedText attributes:attributes] autorelease];
 		[attributedString replaceCharactersInRange:match.range withAttributedString:replacement];
 	}
 
 	fullText = [attributedString string];
+
+	// 2. Inline code: `code`
 	NSRegularExpression *inlineCodeRegex = [NSRegularExpression regularExpressionWithPattern:@"`([^`]+)`" options:0 error:nil];
 	NSArray *codeMatches = [inlineCodeRegex matchesInString:fullText options:0 range:NSMakeRange(0, [fullText length])];
 	for (NSInteger index = [codeMatches count] - 1; index >= 0; index--) {
@@ -104,6 +105,97 @@ static NSString * const LCSystemPromptKey = @"systemPrompt";
 			nil];
 		NSAttributedString *replacement = [[[NSAttributedString alloc] initWithString:matchedText attributes:attributes] autorelease];
 		[attributedString replaceCharactersInRange:match.range withAttributedString:replacement];
+	}
+
+	fullText = [attributedString string];
+
+	// 3. Bold text: **text** or __text__
+	NSRegularExpression *boldRegex = [NSRegularExpression regularExpressionWithPattern:@"\\*\\*([^*]+)\\*\\*" options:0 error:nil];
+	NSArray *boldMatches = [boldRegex matchesInString:fullText options:0 range:NSMakeRange(0, [fullText length])];
+	for (NSInteger index = [boldMatches count] - 1; index >= 0; index--) {
+		NSTextCheckingResult *match = [boldMatches objectAtIndex:index];
+		NSRange contentRange = [match rangeAtIndex:1];
+		NSString *matchedText = [fullText substringWithRange:contentRange];
+		NSDictionary *attributes = [NSDictionary dictionaryWithObjectsAndKeys:
+			[UIFont boldSystemFontOfSize:14.0f], NSFontAttributeName,
+			nil];
+		NSAttributedString *replacement = [[[NSAttributedString alloc] initWithString:matchedText attributes:attributes] autorelease];
+		[attributedString replaceCharactersInRange:match.range withAttributedString:replacement];
+	}
+
+	fullText = [attributedString string];
+
+	// 4. Italic text: *text*
+	NSRegularExpression *italicRegex = [NSRegularExpression regularExpressionWithPattern:@"(?<!\\*)\\*([^*]+)\\*(?!\\*)" options:0 error:nil];
+	NSArray *italicMatches = [italicRegex matchesInString:fullText options:0 range:NSMakeRange(0, [fullText length])];
+	for (NSInteger index = [italicMatches count] - 1; index >= 0; index--) {
+		NSTextCheckingResult *match = [italicMatches objectAtIndex:index];
+		NSRange contentRange = [match rangeAtIndex:1];
+		NSString *matchedText = [fullText substringWithRange:contentRange];
+		NSDictionary *attributes = [NSDictionary dictionaryWithObjectsAndKeys:
+			[UIFont italicSystemFontOfSize:14.0f], NSFontAttributeName,
+			nil];
+		NSAttributedString *replacement = [[[NSAttributedString alloc] initWithString:matchedText attributes:attributes] autorelease];
+		[attributedString replaceCharactersInRange:match.range withAttributedString:replacement];
+	}
+
+	fullText = [attributedString string];
+
+	// 5. Strikethrough: ~~text~~
+	NSRegularExpression *strikeRegex = [NSRegularExpression regularExpressionWithPattern:@"~~([^~]+)~~" options:0 error:nil];
+	NSArray *strikeMatches = [strikeRegex matchesInString:fullText options:0 range:NSMakeRange(0, [fullText length])];
+	for (NSInteger index = [strikeMatches count] - 1; index >= 0; index--) {
+		NSTextCheckingResult *match = [strikeMatches objectAtIndex:index];
+		NSRange contentRange = [match rangeAtIndex:1];
+		NSString *matchedText = [fullText substringWithRange:contentRange];
+		NSDictionary *attributes = [NSDictionary dictionaryWithObjectsAndKeys:
+			[NSNumber numberWithInt:NSUnderlineStyleSingle], NSStrikethroughStyleAttributeName,
+			nil];
+		NSAttributedString *replacement = [[[NSAttributedString alloc] initWithString:matchedText attributes:attributes] autorelease];
+		[attributedString replaceCharactersInRange:match.range withAttributedString:replacement];
+	}
+
+	fullText = [attributedString string];
+
+	// 6. Links: [text](url)
+	NSRegularExpression *linkRegex = [NSRegularExpression regularExpressionWithPattern:@"\\[([^\\]]+)\\]\\(([^\\)]+)\\)" options:0 error:nil];
+	NSArray *linkMatches = [linkRegex matchesInString:fullText options:0 range:NSMakeRange(0, [fullText length])];
+	for (NSInteger index = [linkMatches count] - 1; index >= 0; index--) {
+		NSTextCheckingResult *match = [linkMatches objectAtIndex:index];
+		NSRange textRange = [match rangeAtIndex:1];
+		NSString *linkText = [fullText substringWithRange:textRange];
+		NSDictionary *attributes = [NSDictionary dictionaryWithObjectsAndKeys:
+			[UIColor colorWithRed:0.0f green:0.4f blue:0.8f alpha:1.0f], NSForegroundColorAttributeName,
+			[NSNumber numberWithInt:NSUnderlineStyleSingle], NSUnderlineStyleAttributeName,
+			nil];
+		NSAttributedString *replacement = [[[NSAttributedString alloc] initWithString:linkText attributes:attributes] autorelease];
+		[attributedString replaceCharactersInRange:match.range withAttributedString:replacement];
+	}
+
+	fullText = [attributedString string];
+
+	// 7. Headers: ### Header or ## Header or # Header
+	NSRegularExpression *headerRegex = [NSRegularExpression regularExpressionWithPattern:@"(^|\\n)(#{1,4})\\s+([^\n]+)" options:0 error:nil];
+	NSArray *headerMatches = [headerRegex matchesInString:fullText options:0 range:NSMakeRange(0, [fullText length])];
+	for (NSInteger index = [headerMatches count] - 1; index >= 0; index--) {
+		NSTextCheckingResult *match = [headerMatches objectAtIndex:index];
+		NSRange prefixRange = [match rangeAtIndex:1];
+		NSRange textRange = [match rangeAtIndex:3];
+		NSString *matchedText = [fullText substringWithRange:textRange];
+		
+		NSRange fullMatchRange = match.range;
+		NSString *prefixStr = [fullText substringWithRange:prefixRange];
+		
+		NSDictionary *attributes = [NSDictionary dictionaryWithObjectsAndKeys:
+			[UIFont boldSystemFontOfSize:15.0f], NSFontAttributeName,
+			[UIColor colorWithRed:0.05f green:0.05f blue:0.05f alpha:1.0f], NSForegroundColorAttributeName,
+			nil];
+		NSMutableString *replacementString = [NSMutableString stringWithString:prefixStr];
+		[replacementString appendString:matchedText];
+		
+		NSMutableAttributedString *replacement = [[[NSMutableAttributedString alloc] initWithString:replacementString] autorelease];
+		[replacement addAttributes:attributes range:NSMakeRange([prefixStr length], [matchedText length])];
+		[attributedString replaceCharactersInRange:fullMatchRange withAttributedString:replacement];
 	}
 }
 
@@ -127,10 +219,9 @@ static NSString * const LCSystemPromptKey = @"systemPrompt";
 }
 
 + (NSDictionary *)profileDictionaryFromValues:(NSDictionary *)values identifier:(NSString *)identifierFallback {
-	NSString *providerName = [self trimmedString:[values objectForKey:@"providerName"] fallback:@"AI Assistant"];
-	NSString *baseURL = [self trimmedString:[values objectForKey:@"baseURL"] fallback:@"https://api.openai.com"];
-	NSString *chatPath = [self trimmedString:[values objectForKey:@"chatPath"] fallback:@"/v1/chat/completions"];
-	NSString *chatModel = [self trimmedString:[values objectForKey:@"c-aiModel"] fallback:@"gpt-4o-mini"];
+	NSString *providerName = [self trimmedString:[values objectForKey:@"providerName"] fallback:@"Google Gemini"];
+	NSString *baseURL = [self trimmedString:[values objectForKey:@"baseURL"] fallback:@"https://generativelanguage.googleapis.com"];
+	NSString *chatModel = [self trimmedString:[values objectForKey:@"c-aiModel"] fallback:@"gemini-2.5-flash"];
 	NSString *apiKey = [self trimmedString:[values objectForKey:@"apiKey"] fallback:@""];
 	NSString *identifier = [self providerIdentifierFromValues:values fallback:identifierFallback];
 
@@ -138,13 +229,13 @@ static NSString * const LCSystemPromptKey = @"systemPrompt";
 		identifier, @"identifier",
 		providerName, @"providerName",
 		baseURL, @"baseURL",
-		chatPath, @"chatPath",
 		chatModel, @"c-aiModel",
 		apiKey, @"apiKey",
 		nil];
 }
 
 + (void)registerProviderDefaults {
+	[self invalidateMemoryCache];
 	NSString *configPath = [[NSBundle mainBundle] pathForResource:@"ProviderConfig" ofType:@"plist"];
 	if (configPath == nil) {
 		return;
@@ -161,18 +252,11 @@ static NSString * const LCSystemPromptKey = @"systemPrompt";
 
 	NSArray *profiles = [[NSUserDefaults standardUserDefaults] objectForKey:LCProviderProfilesKey];
 	if ([profiles count] == 0) {
-		NSString *legacyProviderName = [self trimmedString:[[NSUserDefaults standardUserDefaults] objectForKey:@"providerName"] fallback:[defaults objectForKey:@"providerName"]];
-		NSString *legacyBaseURL = [self trimmedString:[[NSUserDefaults standardUserDefaults] objectForKey:@"baseURL"] fallback:[defaults objectForKey:@"baseURL"]];
-		NSString *legacyChatPath = [self trimmedString:[[NSUserDefaults standardUserDefaults] objectForKey:@"chatPath"] fallback:[defaults objectForKey:@"chatPath"]];
-		NSString *legacyModel = [self trimmedString:[[NSUserDefaults standardUserDefaults] objectForKey:@"c-aiModel"] fallback:[defaults objectForKey:@"c-aiModel"]];
-		NSString *legacyKey = [self trimmedString:[[NSUserDefaults standardUserDefaults] objectForKey:@"apiKey"] fallback:[defaults objectForKey:@"apiKey"]];
-
 		NSDictionary *initialProfile = [self profileDictionaryFromValues:[NSDictionary dictionaryWithObjectsAndKeys:
-			(legacyProviderName ?: @"AI Assistant"), @"providerName",
-			(legacyBaseURL ?: @"https://api.openai.com"), @"baseURL",
-			(legacyChatPath ?: @"/v1/chat/completions"), @"chatPath",
-			(legacyModel ?: @"gpt-4o-mini"), @"c-aiModel",
-			(legacyKey ?: @""), @"apiKey",
+			@"Google Gemini", @"providerName",
+			@"https://generativelanguage.googleapis.com", @"baseURL",
+			@"gemini-2.5-flash", @"c-aiModel",
+			@"", @"apiKey",
 			nil] identifier:@"default-profile"];
 
 		[[NSUserDefaults standardUserDefaults] setObject:[NSArray arrayWithObject:initialProfile] forKey:LCProviderProfilesKey];
@@ -182,7 +266,7 @@ static NSString * const LCSystemPromptKey = @"systemPrompt";
 }
 
 + (NSString *)providerDisplayName {
-	return [self trimmedString:[[self activeProviderProfile] objectForKey:@"providerName"] fallback:@"AI Assistant"];
+	return [self trimmedString:[[self activeProviderProfile] objectForKey:@"providerName"] fallback:@"Google Gemini"];
 }
 
 + (NSString *)storedValueForKey:(NSString *)key fallback:(NSString *)fallback {
@@ -198,31 +282,28 @@ static NSString * const LCSystemPromptKey = @"systemPrompt";
 }
 
 + (NSString *)configuredBaseURL {
-	NSString *baseURL = [self trimmedString:[[self activeProviderProfile] objectForKey:@"baseURL"] fallback:@"https://api.openai.com"];
+	NSString *baseURL = [self trimmedString:[[self activeProviderProfile] objectForKey:@"baseURL"] fallback:@"https://generativelanguage.googleapis.com"];
 	while ([baseURL hasSuffix:@"/"]) {
 		baseURL = [baseURL substringToIndex:[baseURL length] - 1];
 	}
 	return baseURL;
 }
 
-+ (NSString *)configuredChatPath {
-	NSString *chatPath = [self trimmedString:[[self activeProviderProfile] objectForKey:@"chatPath"] fallback:@"/v1/chat/completions"];
-	if (![chatPath hasPrefix:@"/"]) {
-		chatPath = [@"/" stringByAppendingString:chatPath];
-	}
-	return chatPath;
-}
-
 + (NSString *)configuredChatModel {
-	return [self trimmedString:[[self activeProviderProfile] objectForKey:@"c-aiModel"] fallback:@"gpt-4o-mini"];
+	return [self trimmedString:[[self activeProviderProfile] objectForKey:@"c-aiModel"] fallback:@"gemini-2.5-flash"];
 }
 
 + (NSString *)configuredSystemPrompt {
+	if (cachedSystemPrompt != nil) {
+		return cachedSystemPrompt;
+	}
 	NSString *prompt = [[NSUserDefaults standardUserDefaults] objectForKey:LCSystemPromptKey];
-	return [self trimmedString:prompt fallback:@""];
+	cachedSystemPrompt = [[self trimmedString:prompt fallback:@""] retain];
+	return cachedSystemPrompt;
 }
 
 + (void)saveSystemPrompt:(NSString *)prompt {
+	[self invalidateMemoryCache];
 	NSString *trimmedPrompt = [self trimmedString:prompt fallback:@""];
 	NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
 	if ([trimmedPrompt length] > 0) {
@@ -234,29 +315,41 @@ static NSString * const LCSystemPromptKey = @"systemPrompt";
 }
 
 + (NSArray *)providerProfiles {
+	if (cachedProfiles != nil) {
+		return cachedProfiles;
+	}
 	NSArray *profiles = [[NSUserDefaults standardUserDefaults] objectForKey:LCProviderProfilesKey];
 	if (![profiles isKindOfClass:[NSArray class]]) {
-		return [NSArray array];
+		cachedProfiles = [[NSArray array] retain];
+	} else {
+		cachedProfiles = [profiles retain];
 	}
-	return profiles;
+	return cachedProfiles;
 }
 
 + (NSString *)activeProviderProfileIdentifier {
-	return [[NSUserDefaults standardUserDefaults] objectForKey:LCActiveProviderProfileIDKey];
+	return [[NSUserDefaults standardUserDefaults] objectForKey:@"agent_activeProviderProfileID"] ?: [[NSUserDefaults standardUserDefaults] objectForKey:LCActiveProviderProfileIDKey];
 }
 
 + (NSDictionary *)activeProviderProfile {
+	if (cachedActiveProfile != nil) {
+		return cachedActiveProfile;
+	}
 	NSString *activeIdentifier = [self activeProviderProfileIdentifier];
 	NSArray *profiles = [self providerProfiles];
 	for (NSDictionary *profile in profiles) {
 		if ([[profile objectForKey:@"identifier"] isEqualToString:activeIdentifier]) {
-			return profile;
+			cachedActiveProfile = [profile retain];
+			return cachedActiveProfile;
 		}
 	}
-	return ([profiles count] > 0 ? [profiles objectAtIndex:0] : [NSDictionary dictionary]);
+	NSDictionary *fallback = ([profiles count] > 0 ? [profiles objectAtIndex:0] : [NSDictionary dictionary]);
+	cachedActiveProfile = [fallback retain];
+	return cachedActiveProfile;
 }
 
 + (void)persistProfiles:(NSArray *)profiles activeIdentifier:(NSString *)activeIdentifier {
+	[self invalidateMemoryCache];
 	NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
 	[defaults setObject:profiles forKey:LCProviderProfilesKey];
 	if ([activeIdentifier length] > 0) {
@@ -266,6 +359,7 @@ static NSString * const LCSystemPromptKey = @"systemPrompt";
 }
 
 + (void)saveActiveProviderProfileWithValues:(NSDictionary *)values {
+	[self invalidateMemoryCache];
 	NSString *activeIdentifier = [self activeProviderProfileIdentifier];
 	NSMutableArray *profiles = [NSMutableArray arrayWithArray:[self providerProfiles]];
 	NSDictionary *updatedProfile = [self profileDictionaryFromValues:values identifier:(activeIdentifier ?: @"default-profile")];
@@ -285,6 +379,7 @@ static NSString * const LCSystemPromptKey = @"systemPrompt";
 }
 
 + (void)createProviderProfileWithValues:(NSDictionary *)values {
+	[self invalidateMemoryCache];
 	NSMutableArray *profiles = [NSMutableArray arrayWithArray:[self providerProfiles]];
 	NSString *identifier = [NSString stringWithFormat:@"profile-%u", arc4random()];
 	NSDictionary *newProfile = [self profileDictionaryFromValues:values identifier:identifier];
@@ -296,6 +391,7 @@ static NSString * const LCSystemPromptKey = @"systemPrompt";
 	if ([identifier length] == 0) {
 		return;
 	}
+	[self invalidateMemoryCache];
 	[self persistProfiles:[self providerProfiles] activeIdentifier:identifier];
 }
 
@@ -303,7 +399,7 @@ static NSString * const LCSystemPromptKey = @"systemPrompt";
 	if ([identifier length] == 0) {
 		return;
 	}
-
+	[self invalidateMemoryCache];
 	NSMutableArray *profiles = [NSMutableArray arrayWithArray:[self providerProfiles]];
 	NSDictionary *updatedProfile = [self profileDictionaryFromValues:values identifier:identifier];
 	for (NSUInteger index = 0; index < [profiles count]; index++) {
@@ -320,7 +416,7 @@ static NSString * const LCSystemPromptKey = @"systemPrompt";
 	if ([identifier length] == 0) {
 		return;
 	}
-
+	[self invalidateMemoryCache];
 	NSMutableArray *profiles = [NSMutableArray arrayWithArray:[self providerProfiles]];
 	for (NSInteger index = [profiles count] - 1; index >= 0; index--) {
 		NSDictionary *profile = [profiles objectAtIndex:index];
@@ -331,15 +427,10 @@ static NSString * const LCSystemPromptKey = @"systemPrompt";
 
 	NSString *activeIdentifier = [self activeProviderProfileIdentifier];
 	if ([profiles count] == 0) {
-		NSString *fallbackName = @"AI Assistant";
-		NSString *fallbackBaseURL = @"https://api.openai.com";
-		NSString *fallbackChatPath = @"/v1/chat/completions";
-		NSString *fallbackModel = @"gpt-4o-mini";
 		NSDictionary *fallbackProfile = [self profileDictionaryFromValues:[NSDictionary dictionaryWithObjectsAndKeys:
-			fallbackName, @"providerName",
-			fallbackBaseURL, @"baseURL",
-			fallbackChatPath, @"chatPath",
-			fallbackModel, @"c-aiModel",
+			@"Google Gemini", @"providerName",
+			@"https://generativelanguage.googleapis.com", @"baseURL",
+			@"gemini-2.5-flash", @"c-aiModel",
 			@"", @"apiKey",
 			nil] identifier:@"default-profile"];
 		[profiles addObject:fallbackProfile];
@@ -352,14 +443,18 @@ static NSString * const LCSystemPromptKey = @"systemPrompt";
 }
 
 + (NSURL *)configuredChatCompletionURL {
-	NSString *fullString = [NSString stringWithFormat:@"%@%@", [self configuredBaseURL], [self configuredChatPath]];
+	NSString *baseURL = [self configuredBaseURL];
+	NSString *model = [self configuredChatModel];
+	if ([baseURL length] == 0) baseURL = @"https://generativelanguage.googleapis.com";
+	if ([model length] == 0) model = @"gemini-2.5-flash";
+	NSString *fullString = [NSString stringWithFormat:@"%@/v1beta/models/%@:generateContent", baseURL, model];
 	return [NSURL URLWithString:fullString];
 }
 
 + (void)applyAuthorizationHeadersToRequest:(NSMutableURLRequest *)request withAPIKey:(NSString *)key {
 	[request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
 	if ([key length] > 0) {
-		[request setValue:[NSString stringWithFormat:@"Bearer %@", key] forHTTPHeaderField:@"Authorization"];
+		[request setValue:key forHTTPHeaderField:@"x-goog-api-key"];
 	}
 }
 
@@ -379,8 +474,50 @@ static NSString * const LCSystemPromptKey = @"systemPrompt";
 		return @"";
 	}
 
+	NSString *rawContent = message.content ?: @"";
+	
+	for (int depth = 0; depth < 8; depth++) {
+		NSString *trimmedContent = [rawContent stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+		if ([trimmedContent length] == 0) {
+			break;
+		}
+
+		NSString *unescaped = trimmedContent;
+		unescaped = [unescaped stringByReplacingOccurrencesOfString:@"\\\"" withString:@"\""];
+		unescaped = [unescaped stringByReplacingOccurrencesOfString:@"\\\\n" withString:@"\n"];
+		unescaped = [unescaped stringByReplacingOccurrencesOfString:@"\\\\" withString:@"\\"];
+		
+		if ([unescaped hasPrefix:@"\""] && [unescaped hasSuffix:@"\""] && [unescaped length] >= 2) {
+			unescaped = [unescaped substringWithRange:NSMakeRange(1, [unescaped length] - 2)];
+			unescaped = [unescaped stringByReplacingOccurrencesOfString:@"\\\"" withString:@"\""];
+		}
+
+		NSData *jsonData = [unescaped dataUsingEncoding:NSUTF8StringEncoding];
+		if (jsonData != nil) {
+			NSError *jsonError = nil;
+			id parsed = [NSJSONSerialization JSONObjectWithData:jsonData options:0 error:&jsonError];
+			if (jsonError == nil && [parsed isKindOfClass:[NSDictionary class]]) {
+				NSDictionary *dict = (NSDictionary *)parsed;
+				NSDictionary *errDict = [dict objectForKey:@"error"];
+				if ([errDict isKindOfClass:[NSDictionary class]]) {
+					NSString *errMsg = [errDict objectForKey:@"message"];
+					if ([errMsg isKindOfClass:[NSString class]] && [errMsg length] > 0) {
+						rawContent = errMsg;
+						continue;
+					}
+				}
+				id directContent = [dict objectForKey:@"content"];
+				if ([directContent isKindOfClass:[NSString class]]) {
+					rawContent = directContent;
+					continue;
+				}
+			}
+		}
+		break;
+	}
+
 	NSString *discardedReasoning = nil;
-	NSString *visibleText = [self stringByStrippingThinkBlocks:message.content extractedReasoning:&discardedReasoning];
+	NSString *visibleText = [self stringByStrippingThinkBlocks:rawContent extractedReasoning:&discardedReasoning];
 	if ([message.hiddenReasoningContent length] == 0 && [discardedReasoning length] > 0) {
 		message.hiddenReasoningContent = discardedReasoning;
 	}
@@ -400,8 +537,8 @@ static NSString * const LCSystemPromptKey = @"systemPrompt";
 + (CGFloat)heightForMessage:(CGMessage *)message width:(CGFloat)width font:(UIFont *)font {
 	NSString *displayText = [self displayTextForMessage:message];
 	CGSize textSize = [displayText sizeWithFont:(font ?: [UIFont systemFontOfSize:15.0f])
-	                          constrainedToSize:CGSizeMake(width, CGFLOAT_MAX)
-	                              lineBreakMode:NSLineBreakByWordWrapping];
+				  constrainedToSize:CGSizeMake(width, CGFLOAT_MAX)
+				      lineBreakMode:NSLineBreakByWordWrapping];
 	CGFloat height = textSize.height;
 	if (message.imageAttachment != nil) {
 		height += 72.0f;
@@ -418,15 +555,23 @@ static NSString * const LCSystemPromptKey = @"systemPrompt";
 	if ([jpegData length] == 0) {
 		return nil;
 	}
-	return [jpegData base64Encoding];
+	return [(id)jpegData base64Encoding];
 }
 
 + (CGMessage *)assistantMessageWithText:(NSString *)text {
 	return [self messageWithText:text role:@"assistant"];
 }
 
-+ (CGMessage *)localMessageWithText:(NSString *)text {
-	return [self messageWithText:text role:@"local"];
++ (CGMessage *)assistantMessageWithText:(NSString *)text image:(UIImage *)image {
+	CGSize size = CGSizeZero;
+	(void)size;
+	CGMessage *message = [self messageWithText:text role:@"assistant"];
+	message.imageAttachment = image;
+	return message;
+}
+
++ (CGMessage *)localMessageWithText:(NSString *)messageText {
+	return [self messageWithText:messageText role:@"user"];
 }
 
 + (NSString *)extractErrorMessageFromResponseData:(NSData *)data fallback:(NSString *)fallback {
@@ -441,9 +586,9 @@ static NSString * const LCSystemPromptKey = @"systemPrompt";
 	}
 
 	NSDictionary *responseDictionary = (NSDictionary *)parsedObject;
-	NSDictionary *errorDictionary = [responseDictionary objectForKey:@"error"];
-	if ([errorDictionary isKindOfClass:[NSDictionary class]]) {
-		NSString *message = [self trimmedString:[errorDictionary objectForKey:@"message"] fallback:nil];
+	NSDictionary *errorMessage = [responseDictionary objectForKey:@"error"];
+	if ([errorMessage isKindOfClass:[NSDictionary class]]) {
+		NSString *message = [self trimmedString:[errorMessage objectForKey:@"message"] fallback:nil];
 		if ([message length] > 0) {
 			return message;
 		}

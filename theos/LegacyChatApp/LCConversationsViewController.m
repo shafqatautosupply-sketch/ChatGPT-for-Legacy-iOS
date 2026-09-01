@@ -19,18 +19,19 @@
 	self = [super initWithStyle:UITableViewStylePlain];
 	if (self) {
 		self.title = @"Chats";
+		_conversations = [[NSMutableArray alloc] init];
 	}
 	return self;
 }
 
-	- (void)viewDidLoad {
-		[super viewDidLoad];
-		self.tableView.separatorStyle = UITableViewCellSeparatorStyleSingleLine;
-		if (UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad) {
-			self.tableView.rowHeight = 56.0f;
-		}
-		self.navigationItem.rightBarButtonItem = [[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAdd target:self action:@selector(newChatTapped)] autorelease];
+- (void)viewDidLoad {
+	[super viewDidLoad];
+	self.tableView.separatorStyle = UITableViewCellSeparatorStyleSingleLine;
+	if (UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad) {
+		self.tableView.rowHeight = 56.0f;
 	}
+	self.navigationItem.rightBarButtonItem = [[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAdd target:self action:@selector(newChatTapped)] autorelease];
+}
 
 - (void)viewWillAppear:(BOOL)animated {
 	[super viewWillAppear:animated];
@@ -44,11 +45,15 @@
 
 	self.loadingConversations = YES;
 	[self.tableView reloadData];
+
 	dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
 		NSArray *loadedConversations = [LCConversationStore loadConversations];
 		dispatch_async(dispatch_get_main_queue(), ^{
 			self.loadingConversations = NO;
-			self.conversations = [NSMutableArray arrayWithArray:loadedConversations];
+			[self.conversations removeAllObjects];
+			if (loadedConversations != nil) {
+				[self.conversations addObjectsFromArray:loadedConversations];
+			}
 			[self.tableView reloadData];
 		});
 	});
@@ -83,17 +88,26 @@
 		return cell;
 	}
 
+	if (indexPath.row >= [self.conversations count]) {
+		return cell;
+	}
+
 	CGConversation *conversation = [self.conversations objectAtIndex:indexPath.row];
 	cell.textLabel.text = conversation.title ?: @"New Chat";
 	cell.detailTextLabel.text = conversation.lastTimeEdited ?: conversation.creationDate;
 	cell.textLabel.font = [UIFont boldSystemFontOfSize:15.0f];
 	cell.detailTextLabel.font = [UIFont systemFontOfSize:12.0f];
+	cell.selectionStyle = UITableViewCellSelectionStyleBlue;
+	cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
 	return cell;
 }
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
 	[tableView deselectRowAtIndexPath:indexPath animated:YES];
 	if (self.loadingConversations && [self.conversations count] == 0) {
+		return;
+	}
+	if (indexPath.row >= [self.conversations count]) {
 		return;
 	}
 	CGConversation *conversation = [self.conversations objectAtIndex:indexPath.row];
@@ -111,6 +125,9 @@
 
 - (void)tableView:(UITableView *)tableView commitEditingStyle:(UITableViewCellEditingStyle)editingStyle forRowAtIndexPath:(NSIndexPath *)indexPath {
 	if (editingStyle != UITableViewCellEditingStyleDelete) {
+		return;
+	}
+	if (indexPath.row >= [self.conversations count]) {
 		return;
 	}
 

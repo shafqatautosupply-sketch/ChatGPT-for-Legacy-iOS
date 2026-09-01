@@ -2,12 +2,17 @@
 #import "CGConversation.h"
 #import "CGAPIHelper.h"
 #import "CGMessage.h"
+#import "NSURLConnection+FoundationCompletions.h"
 
 @interface LCConversationStore ()
 
 + (NSDate *)dateFromString:(NSString *)value;
 
 @end
+
+static NSString * const LCSavedMessageLimitKey = @"lc_saved_message_limit";
+static NSString * const LCLoadedMessageLimitKey = @"lc_loaded_message_limit";
+static NSString * const LCAutoCompressionKey = @"lc_auto_compression_enabled";
 
 static NSInteger LCConversationSort(id leftValue, id rightValue, void *context) {
 	CGConversation *left = (CGConversation *)leftValue;
@@ -17,7 +22,55 @@ static NSInteger LCConversationSort(id leftValue, id rightValue, void *context) 
 
 @implementation LCConversationStore
 
-+ (NSString *)conversationsDirectoryPath {
++ (NSInteger)savedMessageLimit {
+	NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+	if ([defaults objectForKey:LCSavedMessageLimitKey] == nil) {
+		return 0; // Default to 0 (unlimited) so history is never truncated or deleted by default
+	}
+	return [defaults integerForKey:LCSavedMessageLimitKey];
+}
+
++ (void)setSavedMessageLimit:(NSInteger)limit {
+	[[NSUserDefaults standardUserDefaults] setInteger:limit forKey:LCSavedMessageLimitKey];
+	[[NSUserDefaults standardUserDefaults] synchronize];
+}
+
++ (NSInteger)loadedMessageLimit {
+	NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+	if ([defaults objectForKey:LCLoadedMessageLimitKey] == nil) {
+		return 30; // Default
+	}
+	return [defaults integerForKey:LCLoadedMessageLimitKey];
+}
+
++ (void)setLoadedMessageLimit:(NSInteger)limit {
+	[[NSUserDefaults standardUserDefaults] setInteger:limit forKey:LCLoadedMessageLimitKey];
+	[[NSUserDefaults standardUserDefaults] synchronize];
+}
+
++ (BOOL)isAutoCompressionEnabled {
+	NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+	if ([defaults objectForKey:LCAutoCompressionKey] == nil) {
+		return NO; // Default off
+	}
+	return [defaults boolForKey:LCAutoCompressionKey];
+}
+
++ (void)setAutoCompressionEnabled:(BOOL)enabled {
+	[[NSUserDefaults standardUserDefaults] setBool:enabled forKey:LCAutoCompressionKey];
+	[[NSUserDefaults standardUserDefaults] synchronize];
+}
+
++ (NSDateFormatter *)sharedDateFormatter {
+	static NSDateFormatter *sharedFormatter = nil;
+	if (sharedFormatter == nil) {
+		sharedFormatter = [[NSDateFormatter alloc] init];
+		[sharedFormatter setDateFormat:@"yyyy-MM-dd HH:mm:ss"];
+	}
+	return sharedFormatter;
+}
+
++ (NSString *)conversationsDirectory {
 	NSString *libraryDirectory = [NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES) objectAtIndex:0];
 	NSString *directoryPath = [libraryDirectory stringByAppendingPathComponent:@"LegacyChatApp/Conversations"];
 	if (![[NSFileManager defaultManager] fileExistsAtPath:directoryPath]) {
@@ -27,13 +80,14 @@ static NSInteger LCConversationSort(id leftValue, id rightValue, void *context) 
 }
 
 + (NSString *)pathForConversationIdentifier:(NSString *)identifier {
-	return [[self conversationsDirectoryPath] stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.json", identifier]];
+	return [[self conversationsDirectory] stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.json", identifier]];
 }
 
 + (NSString *)stringFromDate:(NSDate *)date {
-	NSDateFormatter *formatter = [[[NSDateFormatter alloc] init] autorelease];
-	[formatter setDateFormat:@"yyyy-MM-dd HH:mm:ss"];
-	return [formatter stringFromDate:date];
+	if (date == nil) {
+		return @"";
+	}
+	return [[self sharedDateFormatter] stringFromDate:date];
 }
 
 + (NSDate *)dateFromString:(NSString *)value {
@@ -41,9 +95,7 @@ static NSInteger LCConversationSort(id leftValue, id rightValue, void *context) 
 		return [NSDate dateWithTimeIntervalSince1970:0];
 	}
 
-	NSDateFormatter *formatter = [[[NSDateFormatter alloc] init] autorelease];
-	[formatter setDateFormat:@"yyyy-MM-dd HH:mm:ss"];
-	NSDate *date = [formatter dateFromString:value];
+	NSDate *date = [[self sharedDateFormatter] dateFromString:value];
 	return date ?: [NSDate dateWithTimeIntervalSince1970:0];
 }
 
@@ -77,7 +129,7 @@ static NSInteger LCConversationSort(id leftValue, id rightValue, void *context) 
 		![message.role isEqualToString:@"local"]) {
 		return NO;
 	}
-	return ([message.content length] > 0 || message.imageAttachment != nil);
+	return ([message.content length] > 0);
 }
 
 + (BOOL)hasMeaningfulMessages:(NSArray *)messages {
@@ -98,92 +150,161 @@ static NSInteger LCConversationSort(id leftValue, id rightValue, void *context) 
 			}
 			return title;
 		}
-		if ([message.role isEqualToString:@"user"] && message.imageAttachment != nil) {
-			return @"Photo";
-		}
 	}
 	return fallback;
 }
 
 + (NSDictionary *)dictionaryForMessage:(CGMessage *)message {
-	NSMutableDictionary *dictionary = [NSMutableDictionary dictionaryWithObjectsAndKeys:
-		(message.author ?: @""), @"name",
-		(message.role ?: @"assistant"), @"role",
-		[NSNumber numberWithInt:message.type], @"type",
-		(message.content ?: @""), @"message",
-		nil];
-	if ([message.hiddenReasoningContent length] > 0) {
-		[dictionary setObject:message.hiddenReasoningContent forKey:@"hiddenReasoningContent"];
+	NSMutableDictionary *dictionary = [NSMutableDictionary dictionary];
+	if ([message.role length] > 0) {
+		[dictionary setObject:message.role forKey:@"role"];
+	} else {
+		[dictionary setObject:@"assistant" forKey:@"role"];
 	}
-	if (message.imageAttachment != nil) {
-		NSString *base64Image = [CGAPIHelper base64StringForImage:message.imageAttachment];
-		if ([base64Image length] > 0) {
-			[dictionary setObject:base64Image forKey:@"imageBase64"];
-		}
+	[dictionary setObject:(message.content ?: @"") forKey:@"content"];
+
+	NSString *toolCallID = message.toolCallID;
+	if ([toolCallID length] > 0) {
+		[dictionary setObject:toolCallID forKey:@"tool_call_id"];
 	}
+
+	NSArray *tc = [message.toolCalls isKindOfClass:[NSArray class]] ? message.toolCalls : nil;
+	if ([tc count] > 0) {
+		[dictionary setObject:tc forKey:@"tool_calls"];
+	}
+
 	return dictionary;
 }
 
 + (CGMessage *)messageFromDictionary:(NSDictionary *)dictionary {
 	CGMessage *message = [[[CGMessage alloc] init] autorelease];
-	message.author = [dictionary objectForKey:@"name"];
-	message.role = [dictionary objectForKey:@"role"];
-	message.type = [[dictionary objectForKey:@"type"] intValue];
-	message.content = [dictionary objectForKey:@"message"];
-	message.hiddenReasoningContent = [dictionary objectForKey:@"hiddenReasoningContent"];
-	NSString *base64Image = [dictionary objectForKey:@"imageBase64"];
-	if ([base64Image length] > 0) {
-		NSData *imageData = [[[NSData alloc] initWithBase64Encoding:base64Image] autorelease];
-		if ([imageData length] > 0) {
-			message.imageAttachment = [UIImage imageWithData:imageData];
-		}
+	message.role = [dictionary objectForKey:@"role"] ?: @"assistant";
+	message.content = [dictionary objectForKey:@"content"] ?: [dictionary objectForKey:@"message"] ?: @"";
+	message.author = [dictionary objectForKey:@"name"] ?: @"AI Assistant";
+
+	NSString *toolCallID = [dictionary objectForKey:@"tool_call_id"] ?: [dictionary objectForKey:@"toolCallID"];
+	if ([toolCallID length] > 0) {
+		message.toolCallID = toolCallID;
 	}
+
+	NSArray *toolCalls = [dictionary objectForKey:@"tool_calls"] ?: [dictionary objectForKey:@"toolCalls"];
+	if ([toolCalls isKindOfClass:[NSArray class]]) {
+		message.toolCalls = toolCalls;
+	}
+
+	message.type = [message.role isEqualToString:@"user"] ? 1 : 2;
 	message.indestructible = YES;
 	message.avatar = [UIImage imageNamed:(message.type == 1 ? @"Images/defaultUserAvatar.png" : @"Images/defaultAssistantAvatar.png")];
-
-	CGFloat contentWidth = [UIScreen mainScreen].bounds.size.width - 78.0f;
-	message.contentHeight = (int)[CGAPIHelper heightForMessage:message width:contentWidth font:[UIFont systemFontOfSize:15.0f]];
 	return message;
 }
 
-+ (void)saveMessages:(NSArray *)messages conversationID:(NSString *)conversationID title:(NSString *)title {
-	if ([conversationID length] == 0) {
-		return;
++ (NSArray *)compressedMessagesFromMessages:(NSArray *)messages maxRecentCount:(NSInteger)recentCount {
+	if ([messages count] == 0) {
+		return messages;
 	}
 
-	if (![self hasMeaningfulMessages:messages]) {
-		[self deleteConversationWithIdentifier:conversationID];
-		return;
+	NSString *apiKey = [CGAPIHelper currentAPIKey];
+	if ([apiKey length] == 0) {
+		return messages;
 	}
 
-	NSMutableArray *serializedMessages = [NSMutableArray array];
-	for (CGMessage *message in messages) {
-		if (![self messageShouldBePersisted:message]) {
-			continue;
+	NSInteger keepCount = (recentCount < [messages count]) ? recentCount : 1;
+	NSRange recentRange = NSMakeRange([messages count] - keepCount, keepCount);
+	NSArray *recentMessages = [messages subarrayWithRange:recentRange];
+	NSArray *olderMessages = [messages subarrayWithRange:NSMakeRange(0, [messages count] - keepCount)];
+
+	if ([olderMessages count] == 0) {
+		return messages;
+	}
+
+	NSMutableString *transcript = [NSMutableString string];
+	for (id msgObj in olderMessages) {
+		NSString *role = nil;
+		NSString *content = nil;
+		if ([msgObj isKindOfClass:[CGMessage class]]) {
+			CGMessage *msg = (CGMessage *)msgObj;
+			role = msg.role;
+			content = msg.content;
+		} else if ([msgObj isKindOfClass:[NSDictionary class]]) {
+			NSDictionary *dict = (NSDictionary *)msgObj;
+			role = [dict objectForKey:@"role"];
+			content = [dict objectForKey:@"content"];
 		}
-		[serializedMessages addObject:[self dictionaryForMessage:message]];
+		if ([content length] > 0) {
+			NSString *roleName = [role isEqualToString:@"user"] ? @"User" : ([role isEqualToString:@"tool"] ? @"Tool" : @"Assistant");
+			[transcript appendFormat:@"%@: %@\n", roleName, content];
+		}
 	}
 
-	NSString *nowString = [self stringFromDate:[NSDate date]];
-	NSString *filePath = [self pathForConversationIdentifier:conversationID];
-	NSDictionary *existingConversation = [NSDictionary dictionaryWithContentsOfFile:filePath];
-	NSString *createdAt = [existingConversation objectForKey:@"createdAt"];
-	if ([createdAt length] == 0) {
-		createdAt = nowString;
+	if ([transcript length] == 0) {
+		return messages;
 	}
 
-	NSString *resolvedTitle = [self derivedTitleForMessages:messages fallback:title];
-	NSDictionary *conversationDictionary = [NSDictionary dictionaryWithObjectsAndKeys:
-		conversationID, @"conversationID",
-		(resolvedTitle ?: @"New Chat"), @"title",
-		createdAt, @"createdAt",
-		nowString, @"updatedAt",
-		serializedMessages, @"messages",
+	NSString *summaryPrompt = [NSString stringWithFormat:@"Summarize the following previous chat conversation transcript concisely, capturing key facts, decisions, and context. Output only the summary:\n\n%@", transcript];
+
+	NSDictionary *sysInst = [NSDictionary dictionaryWithObject:
+		[NSArray arrayWithObject:[NSDictionary dictionaryWithObject:@"You are a helpful assistant." forKey:@"text"]]
+		forKey:@"parts"];
+
+	NSDictionary *payload = [NSDictionary dictionaryWithObjectsAndKeys:
+		[NSArray arrayWithObject:
+			[NSDictionary dictionaryWithObjectsAndKeys:
+				@"user", @"role",
+				[NSArray arrayWithObject:[NSDictionary dictionaryWithObject:summaryPrompt forKey:@"text"]], @"parts",
+				nil]], @"contents",
+		sysInst, @"system_instruction",
 		nil];
 
-	NSData *jsonData = [NSJSONSerialization dataWithJSONObject:conversationDictionary options:NSJSONWritingPrettyPrinted error:nil];
-	[jsonData writeToFile:filePath atomically:YES];
-	[self setCurrentConversationIdentifier:conversationID];
+	NSError *jsonError = nil;
+	NSData *bodyData = [NSJSONSerialization dataWithJSONObject:payload options:0 error:&jsonError];
+	if (jsonError != nil || bodyData == nil) {
+		return messages;
+	}
+
+	NSMutableURLRequest *request = [[[NSMutableURLRequest alloc] initWithURL:[CGAPIHelper configuredChatCompletionURL]] autorelease];
+	[request setHTTPMethod:@"POST"];
+	[request setHTTPBody:bodyData];
+	[request setTimeoutInterval:45.0];
+	[CGAPIHelper applyAuthorizationHeadersToRequest:request withAPIKey:apiKey];
+
+	NSURLResponse *response = nil;
+	NSError *requestError = nil;
+	NSData *responseData = [NSURLConnection sendSynchronousRequest:request returningResponse:&response error:&requestError];
+
+	if (responseData == nil || requestError != nil) {
+		return messages;
+	}
+
+	NSDictionary *responseDict = [NSJSONSerialization JSONObjectWithData:responseData options:0 error:nil];
+	NSString *aiSummary = nil;
+	if ([responseDict isKindOfClass:[NSDictionary class]]) {
+		NSArray *candidates = [responseDict objectForKey:@"candidates"];
+		if ([candidates isKindOfClass:[NSArray class]] && [candidates count] > 0) {
+			NSDictionary *firstCandidate = [candidates objectAtIndex:0];
+			NSDictionary *contentDict = [firstCandidate objectForKey:@"content"];
+			NSArray *parts = [contentDict objectForKey:@"parts"];
+			for (NSDictionary *part in parts) {
+				id textObj = [part objectForKey:@"text"];
+				if ([textObj isKindOfClass:[NSString class]] && [(NSString *)textObj length] > 0) {
+					aiSummary = textObj;
+					break;
+				}
+			}
+		}
+	}
+
+	if ([aiSummary length] == 0) {
+		return messages;
+	}
+
+	CGMessage *summaryMessage = [[[CGMessage alloc] init] autorelease];
+	summaryMessage.role = @"system";
+	summaryMessage.content = [NSString stringWithFormat:@"[ARCHIVED AI CONTEXT SUMMARY of %ld previous messages]:\n%@", (long)[olderMessages count], aiSummary];
+
+	NSMutableArray *result = [NSMutableArray array];
+	[result addObject:summaryMessage];
+	[result addObjectsFromArray:recentMessages];
+	return result;
 }
 
 + (CGConversation *)loadConversationWithIdentifier:(NSString *)identifier {
@@ -210,19 +331,27 @@ static NSInteger LCConversationSort(id leftValue, id rightValue, void *context) 
 	conversation.messages = [NSMutableArray array];
 
 	NSArray *messages = [conversationDictionary objectForKey:@"messages"];
-	for (NSDictionary *messageDictionary in messages) {
+	NSInteger totalCount = [messages count];
+	NSInteger limit = [self loadedMessageLimit];
+	NSInteger startIndex = (limit > 0 && totalCount > limit) ? totalCount - limit : 0;
+	for (NSInteger i = startIndex; i < totalCount; i++) {
+		NSDictionary *messageDictionary = [messages objectAtIndex:i];
 		CGMessage *message = [self messageFromDictionary:messageDictionary];
 		if (message != nil) {
 			[conversation.messages addObject:message];
 		}
 	}
-	conversation.messageCount = (int)[conversation.messages count];
+	conversation.messageCount = (int)[messages count];
 	return conversation;
 }
 
++ (CGConversation *)conversationWithIdentifier:(NSString *)identifier {
+	return [self loadConversationWithIdentifier:identifier];
+}
+
 + (NSArray *)loadConversations {
-	NSMutableArray *conversations = [NSMutableArray array];
-	NSArray *files = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:[self conversationsDirectoryPath] error:nil];
+	NSMutableArray *convs = [NSMutableArray array];
+	NSArray *files = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:[self conversationsDirectory] error:nil];
 	for (NSString *fileName in files) {
 		if (![fileName hasSuffix:@".json"]) {
 			continue;
@@ -231,13 +360,99 @@ static NSInteger LCConversationSort(id leftValue, id rightValue, void *context) 
 		NSString *identifier = [fileName stringByDeletingPathExtension];
 		CGConversation *conversation = [self loadConversationWithIdentifier:identifier];
 		if (conversation != nil) {
-			[conversations addObject:conversation];
+			[convs addObject:conversation];
 		}
 	}
 
-	[conversations sortUsingFunction:LCConversationSort context:NULL];
+	[convs sortUsingFunction:LCConversationSort context:NULL];
 
-	return conversations;
+	return convs;
+}
+
++ (NSArray *)allConversations {
+	return [self loadConversations];
+}
+
++ (BOOL)compressCurrentConversationInPlace {
+	NSString *currentID = [self currentConversationIdentifier];
+	if ([currentID length] == 0) {
+		return NO;
+	}
+
+	CGConversation *conv = [self loadConversationWithIdentifier:currentID];
+	if (!conv || [conv.messages count] == 0) {
+		return NO;
+	}
+
+	NSArray *compressed = [self compressedMessagesFromMessages:conv.messages maxRecentCount:10];
+	if (compressed == conv.messages) {
+		return NO;
+	}
+
+	[self saveMessages:compressed conversationID:currentID title:conv.title];
+	return YES;
+}
+
++ (void)saveMessages:(NSArray *)messages conversationID:(NSString *)conversationID title:(NSString *)title {
+	if (![self hasMeaningfulMessages:messages]) {
+		[self deleteConversationWithIdentifier:conversationID];
+		return;
+	}
+
+	NSArray *messagesToSave = messages;
+	if ([self isAutoCompressionEnabled] && [messages count] > 40) {
+		NSArray *compressed = [self compressedMessagesFromMessages:messages maxRecentCount:15];
+		if (compressed != messages) {
+			messagesToSave = compressed;
+		} else {
+			NSInteger totalCount = [messages count];
+			NSInteger limit = [self savedMessageLimit];
+			if (limit > 0 && totalCount > limit) {
+				messagesToSave = [messages subarrayWithRange:NSMakeRange(totalCount - limit, limit)];
+			}
+		}
+	} else {
+		NSInteger totalCount = [messages count];
+		NSInteger limit = [self savedMessageLimit];
+		if (limit > 0 && totalCount > limit) {
+			messagesToSave = [messages subarrayWithRange:NSMakeRange(totalCount - limit, limit)];
+		}
+	}
+
+	NSMutableArray *serializedMessages = [NSMutableArray array];
+	for (id messageObj in messagesToSave) {
+		if ([messageObj isKindOfClass:[CGMessage class]]) {
+			CGMessage *message = (CGMessage *)messageObj;
+			if (![self messageShouldBePersisted:message]) {
+				continue;
+			}
+			[serializedMessages addObject:[self dictionaryForMessage:message]];
+		} else if ([messageObj isKindOfClass:[NSDictionary class]]) {
+			[serializedMessages addObject:messageObj];
+		}
+	}
+
+	NSString *nowString = [self stringFromDate:[NSDate date]];
+	NSString *filePath = [self pathForConversationIdentifier:conversationID];
+	NSDictionary *existingConversation = [NSDictionary dictionaryWithContentsOfFile:filePath];
+	NSString *createdAt = [existingConversation objectForKey:@"createdAt"];
+	[createdAt length]; // referenced
+	if ([createdAt length] == 0) {
+		createdAt = nowString;
+	}
+
+	NSString *resolvedTitle = [self derivedTitleForMessages:messages fallback:title];
+	NSDictionary *conversationDictionary = [NSDictionary dictionaryWithObjectsAndKeys:
+		conversationID, @"conversationID",
+		(resolvedTitle ?: @"New Chat"), @"title",
+		createdAt, @"createdAt",
+		nowString, @"updatedAt",
+		serializedMessages, @"messages",
+		nil];
+
+	NSData *jsonData = [NSJSONSerialization dataWithJSONObject:conversationDictionary options:0 error:nil];
+	[jsonData writeToFile:filePath atomically:YES];
+	[self setCurrentConversationIdentifier:conversationID];
 }
 
 + (BOOL)deleteConversationWithIdentifier:(NSString *)identifier {

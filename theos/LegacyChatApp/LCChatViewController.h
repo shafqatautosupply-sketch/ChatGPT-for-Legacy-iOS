@@ -1,5 +1,8 @@
 #import <UIKit/UIKit.h>
 
-@interface LCChatViewController : UIViewController <UITableViewDataSource, UITableViewDelegate, UITextViewDelegate, UIActionSheetDelegate, UIImagePickerControllerDelegate, UINavigationControllerDelegate>
+@interface LCChatViewController : UIViewController <UITextViewDelegate>
+
+@property (nonatomic, retain) NSMutableArray *messages;
+@property (nonatomic, retain) NSMutableArray *allMessages;
 
 @end

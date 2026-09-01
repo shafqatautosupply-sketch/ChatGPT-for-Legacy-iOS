@@ -11,6 +11,9 @@
 @property (nonatomic, retain) NSString *imageHash;
 @property (nonatomic, retain) UIImage *imageAttachment;
 @property (nonatomic, retain) NSString *role;
+@property (nonatomic, retain) NSString *toolCallID;
+@property (nonatomic, retain) NSString *toolName;
+@property (nonatomic, retain) NSArray *toolCalls;
 
 @property (nonatomic, assign) int type;
 @property (nonatomic, assign) BOOL indestructible;

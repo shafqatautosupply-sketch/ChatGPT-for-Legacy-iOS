@@ -6,7 +6,7 @@
 @property (nonatomic, retain) UIImageView *avatar;
 @property (nonatomic, retain) UILabel *authorLabel;
 @property (nonatomic, retain) UIView *thinkingBackgroundView;
-@property (nonatomic, retain) UILabel *contentLabel;
+@property (nonatomic, retain) UITextView *contentTextView;
 @property (nonatomic, retain) UIImageView *attachmentPreview;
 @property (nonatomic, retain) UIImageView *separator;
 @property (nonatomic, retain) UIImageView *iOS7Separator;

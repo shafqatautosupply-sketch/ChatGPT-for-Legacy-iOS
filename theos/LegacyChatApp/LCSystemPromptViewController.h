@@ -1,5 +1,5 @@
 #import <UIKit/UIKit.h>
 
-@interface LCSystemPromptViewController : UIViewController <UITextViewDelegate>
+@interface LCSystemPromptViewController : UITableViewController <UITextViewDelegate>
 
 @end

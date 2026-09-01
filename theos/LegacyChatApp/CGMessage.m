@@ -10,6 +10,9 @@
 @synthesize imageHash = _imageHash;
 @synthesize imageAttachment = _imageAttachment;
 @synthesize role = _role;
+@synthesize toolCallID = _toolCallID;
+@synthesize toolName = _toolName;
+@synthesize toolCalls = _toolCalls;
 @synthesize type = _type;
 @synthesize indestructible = _indestructible;
 @synthesize contentHeight = _contentHeight;
@@ -25,6 +28,9 @@
 	[_imageHash release];
 	[_imageAttachment release];
 	[_role release];
+	[_toolCallID release];
+	[_toolName release];
+	[_toolCalls release];
 	[super dealloc];
 }
 

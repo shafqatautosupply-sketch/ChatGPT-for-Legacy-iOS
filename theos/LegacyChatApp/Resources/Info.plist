@@ -5,21 +5,21 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>Chatbox</string>
+	<string>Agentic</string>
 	<key>CFBundleExecutable</key>
-	<string>LegacyChatApp</string>
+	<string>Agentic</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.wtfllix.legacychatapp</string>
+	<string>com.creative.agentic</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>Legacy-Chatbox</string>
+	<string>Agentic</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.1.1</string>
+	<string>1.0.0</string>
 	<key>CFBundleVersion</key>
-	<string>38</string>
+	<string>100</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>CFBundleIconFiles</key>
