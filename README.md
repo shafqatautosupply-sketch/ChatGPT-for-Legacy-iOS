@@ -59,6 +59,11 @@ theos/LegacyChatApp/packages/
 - **API Key**：保存在本机设备上。
 - **Tool Calling**：配置并启用原生工具调用框架相关参数。
 
+### 致谢与鸣谢
+
+- **主仓库原作者**：[BagXML](https://github.com/BagXML)，感谢其创建了优秀的旧 iOS 设备 AI 客户端基础项目。
+- **中间分支开发者**：Li Xiang，感谢其在此基础上的修改与中间分支代码，作为本项目二次开发的起点。
+
 ### 已知限制
 
 - 目前仅支持竖屏。
@@ -123,6 +128,11 @@ Open `Settings > Model Configurations` on device and add your provider:
 - **Model**: Enter the exact model name.
 - **API Key**: Stored securely on device.
 - **Tool Calling**: Configure and enable the native tool-calling framework parameters.
+
+### Acknowledgments & Credits
+
+- **Original Project Creator**: [BagXML](https://github.com/BagXML) for creating the foundational legacy iOS AI client repository.
+- **Intermediate Fork Developer**: Li Xiang, for the intermediate modifications and codebase used as a starting point for this enhanced version.
 
 ### Known Limitations
 
