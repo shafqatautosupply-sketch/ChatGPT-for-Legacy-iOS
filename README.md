@@ -24,9 +24,9 @@
 
 ## Supported Devices
 
-- **iPhone 4 / 4S** (iOS 6, Portrait)
-- **iPhone 5** (iOS 6, Portrait)
-- **iPad 4** (iOS 6, Portrait)
+- **iPhone 4S (iOS 6, Portrait)** — *Primary tested and verified device*
+- iPhone 4 / iPhone 5 (iOS 6, Portrait)
+- iPad 4 (iOS 6, Portrait)
 
 ---
 
