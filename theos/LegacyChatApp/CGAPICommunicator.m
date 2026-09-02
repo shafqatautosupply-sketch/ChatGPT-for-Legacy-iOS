@@ -212,9 +212,34 @@ static BOOL g_isAgentCancelled = NO;
 		nil];
 
 	NSString *systemPrompt = [CGAPIHelper configuredSystemPrompt];
+	NSMutableString *fullSystemPrompt = [NSMutableString string];
 	if ([systemPrompt length] > 0) {
+		[fullSystemPrompt appendString:systemPrompt];
+	}
+
+	for (id message in messages) {
+		if ([message isKindOfClass:[CGMessage class]]) {
+			CGMessage *msg = (CGMessage *)message;
+			if ([msg.role isEqualToString:@"system"] && [msg.content length] > 0) {
+				if ([fullSystemPrompt length] > 0) {
+					[fullSystemPrompt appendString:@"\n\n"];
+				}
+				[fullSystemPrompt appendString:msg.content];
+			}
+		} else if ([message isKindOfClass:[NSDictionary class]]) {
+			NSDictionary *dict = (NSDictionary *)message;
+			if ([[dict objectForKey:@"role"] isEqualToString:@"system"] && [[dict objectForKey:@"content"] length] > 0) {
+				if ([fullSystemPrompt length] > 0) {
+					[fullSystemPrompt appendString:@"\n\n"];
+				}
+				[fullSystemPrompt appendString:[dict objectForKey:@"content"]];
+			}
+		}
+	}
+
+	if ([fullSystemPrompt length] > 0) {
 		NSDictionary *sysInst = [NSDictionary dictionaryWithObject:
-			[NSArray arrayWithObject:[NSDictionary dictionaryWithObject:systemPrompt forKey:@"text"]]
+			[NSArray arrayWithObject:[NSDictionary dictionaryWithObject:fullSystemPrompt forKey:@"text"]]
 			forKey:@"parts"];
 		[payload setObject:sysInst forKey:@"system_instruction"];
 	}

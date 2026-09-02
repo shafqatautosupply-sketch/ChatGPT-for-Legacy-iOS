@@ -222,16 +222,20 @@ static NSInteger LCConversationSort(id leftValue, id rightValue, void *context) 
 	NSInteger keepCount = (recentCount < [messages count]) ? recentCount : 1;
 	NSRange recentRange = NSMakeRange([messages count] - keepCount, keepCount);
 
-	// Prevent starting recent range on an orphan tool response message
+	// Prevent starting recent range on an orphan tool response message or assistant message with tool calls
 	while (recentRange.location < [messages count]) {
 		id msgObj = [messages objectAtIndex:recentRange.location];
 		NSString *role = nil;
+		NSArray *tc = nil;
 		if ([msgObj isKindOfClass:[CGMessage class]]) {
-			role = ((CGMessage *)msgObj).role;
+			CGMessage *m = (CGMessage *)msgObj;
+			role = m.role;
+			tc = m.toolCalls;
 		} else if ([msgObj isKindOfClass:[NSDictionary class]]) {
 			role = [(NSDictionary *)msgObj objectForKey:@"role"];
+			tc = [(NSDictionary *)msgObj objectForKey:@"tool_calls"];
 		}
-		if ([role isEqualToString:@"tool"]) {
+		if ([role isEqualToString:@"tool"] || [tc count] > 0) {
 			recentRange.location++;
 			recentRange.length--;
 		} else {
