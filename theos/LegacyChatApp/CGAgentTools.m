@@ -9,8 +9,21 @@
 		return [NSString stringWithFormat:@"[GUARDRAIL TRIGGERED] %@", reason];
 	}
 
+	NSString *targetWorkspace = workspaceDir;
+	if ([targetWorkspace length] == 0) {
+		NSString *docsDir = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) lastObject];
+		if ([docsDir length] == 0) docsDir = @"/var/mobile/Documents";
+		targetWorkspace = [docsDir stringByAppendingPathComponent:@"SandBox"];
+	}
+	targetWorkspace = [targetWorkspace stringByStandardizingPath];
+
+	NSFileManager *fm = [NSFileManager defaultManager];
+	if (![fm fileExistsAtPath:targetWorkspace]) {
+		[fm createDirectoryAtPath:targetWorkspace withIntermediateDirectories:YES attributes:nil error:nil];
+	}
+
 	NSMutableString *prefix = [NSMutableString string];
-	[prefix appendFormat:@"cd \"%@\" 2>/dev/null; ", (workspaceDir ?: @".")];
+	[prefix appendFormat:@"mkdir -p \"%@\"; cd \"%@\" 2>/dev/null; ", targetWorkspace, targetWorkspace];
 
 	NSArray *preCommands = [[NSUserDefaults standardUserDefaults] arrayForKey:@"agent_pre_execution_commands"];
 	for (NSString *preCmd in preCommands) {
@@ -20,7 +33,6 @@
 		}
 	}
 
-	// Capture both stdout and stderr (2>&1) so compiler warnings/errors from clang are fully captured
 	NSString *fullCmd = [NSString stringWithFormat:@"%@ %@ 2>&1", prefix, command];
 	FILE *fp = popen([fullCmd UTF8String], "r");
 	if (fp == NULL) {
@@ -38,7 +50,7 @@
 
 	if ([output length] == 0) {
 		NSMutableString *fPrefix = [NSMutableString string];
-		[fPrefix appendFormat:@"cd \"%@\" 2>/dev/null; ", (workspaceDir ?: @".")];
+		[fPrefix appendFormat:@"mkdir -p \"%@\"; cd \"%@\" 2>/dev/null; ", targetWorkspace, targetWorkspace];
 		for (NSString *preCmd in preCommands) {
 			NSString *trimmed = [preCmd stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
 			if ([trimmed length] > 0) {
@@ -61,10 +73,24 @@
 }
 
 + (NSString *)writeFileAtPath:(NSString *)path content:(id)content workspaceDirectory:(NSString *)workspaceDir {
+	NSString *targetWorkspace = workspaceDir;
+	if ([targetWorkspace length] == 0) {
+		NSString *docsDir = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) lastObject];
+		if ([docsDir length] == 0) docsDir = @"/var/mobile/Documents";
+		targetWorkspace = [docsDir stringByAppendingPathComponent:@"SandBox"];
+	}
+	targetWorkspace = [targetWorkspace stringByStandardizingPath];
+
+	NSFileManager *fm = [NSFileManager defaultManager];
+	if (![fm fileExistsAtPath:targetWorkspace]) {
+		[fm createDirectoryAtPath:targetWorkspace withIntermediateDirectories:YES attributes:nil error:nil];
+	}
+
 	NSString *targetPath = path;
 	if (![path isAbsolutePath]) {
-		targetPath = [workspaceDir stringByAppendingPathComponent:path];
+		targetPath = [targetWorkspace stringByAppendingPathComponent:path];
 	}
+	targetPath = [targetPath stringByStandardizingPath];
 
 	if (![CGAgentGuardrails isPathAllowed:targetPath]) {
 		return @"Error: Cannot write outside of workspace or Theos directory.";
