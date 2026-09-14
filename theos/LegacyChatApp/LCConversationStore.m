@@ -222,7 +222,6 @@ static NSInteger LCConversationSort(id leftValue, id rightValue, void *context) 
 	NSInteger keepCount = (recentCount < [messages count]) ? recentCount : 1;
 	NSRange recentRange = NSMakeRange([messages count] - keepCount, keepCount);
 
-	// Prevent starting recent range on an orphan tool response message or assistant message with tool calls
 	while (recentRange.location < [messages count]) {
 		id msgObj = [messages objectAtIndex:recentRange.location];
 		NSString *role = nil;
@@ -367,23 +366,9 @@ static NSInteger LCConversationSort(id leftValue, id rightValue, void *context) 
 	conversation.messages = [NSMutableArray array];
 
 	NSArray *messages = [conversationDictionary objectForKey:@"messages"];
-	NSInteger totalCount = [messages count];
-	NSInteger limit = [self loadedMessageLimit];
-	NSInteger startIndex = (limit > 0 && totalCount > limit) ? totalCount - limit : 0;
-
-	// Prevent starting load window on an orphan tool response message
-	while (startIndex < totalCount) {
-		NSDictionary *msgDict = [messages objectAtIndex:startIndex];
-		NSString *role = [msgDict objectForKey:@"role"];
-		if ([role isEqualToString:@"tool"]) {
-			startIndex++;
-		} else {
-			break;
-		}
-	}
-
-	for (NSInteger i = startIndex; i < totalCount; i++) {
-		NSDictionary *messageDictionary = [messages objectAtIndex:i];
+	// Load ALL messages into conversation.messages so background saving never drops older messages.
+	// Display limiting (loadedMessageLimit) is handled by LCChatViewController for the UI.
+	for (NSDictionary *messageDictionary in messages) {
 		CGMessage *message = [self messageFromDictionary:messageDictionary];
 		if (message != nil) {
 			[conversation.messages addObject:message];

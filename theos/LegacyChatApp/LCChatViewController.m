@@ -267,11 +267,9 @@
             self.fullChatAttributedString = [[[NSMutableAttributedString alloc] init] autorelease];
         }
         
-        // In-place mutation: only calculate and append the new message!
         [self.fullChatAttributedString appendAttributedString:sectionAttrStr];
         self.chatTextView.attributedText = self.fullChatAttributedString;
         
-        // Leave half of previous distance (approx 11 points) between the top edge of screen and the separator bar
         CGPoint targetOffset = CGPointMake(0.0f, MAX(0.0f, startOfNewMessageY - 3.0f));
         [UIView animateWithDuration:0.25f animations:^{
             self.chatTextView.contentOffset = targetOffset;
@@ -542,7 +540,7 @@
 
 - (void)dealloc {
 	[[NSNotificationCenter defaultCenter] removeObserver:self];
-	[_chatTextView release]; [_toolbar release]; [_inputField release]; [_sendButton release];[_messages release]; [_allMessages release]; [_currentConversationIdentifier release];
+	[_chatTextView release]; [_toolbar release]; [_inputField release]; [_sendButton release]; [_messages release]; [_allMessages release]; [_currentConversationIdentifier release];
 	[_fullChatAttributedString release];
 	[_tapGesture release];
 	[super dealloc];

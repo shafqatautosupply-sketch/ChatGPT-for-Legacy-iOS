@@ -264,19 +264,33 @@ static BOOL g_isAgentCancelled = NO;
 + (NSString *)workspaceDirectory {
 	NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
 	NSString *savedWorkspace = [defaults stringForKey:@"agent_workspace_dir"];
-	if ([savedWorkspace length] > 0) {
-		NSFileManager *fm = [NSFileManager defaultManager];
-		if (![fm fileExistsAtPath:savedWorkspace]) {
-			[fm createDirectoryAtPath:savedWorkspace withIntermediateDirectories:YES attributes:nil error:nil];
-		}
-		return savedWorkspace;
-	}
-	NSString *sandboxPath = @"/var/mobile/Documents/SandBox";
 	NSFileManager *fm = [NSFileManager defaultManager];
-	if (![fm fileExistsAtPath:sandboxPath]) {
-		[fm createDirectoryAtPath:sandboxPath withIntermediateDirectories:YES attributes:nil error:nil];
+
+	NSString *docsDir = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) lastObject];
+	if ([docsDir length] == 0) {
+		docsDir = @"/var/mobile/Documents";
 	}
-	return sandboxPath;
+	NSString *defaultSandbox = [docsDir stringByAppendingPathComponent:@"SandBox"];
+
+	if ([savedWorkspace length] > 0) {
+		NSString *standardized = [savedWorkspace stringByStandardizingPath];
+		NSError *error = nil;
+		if (![fm fileExistsAtPath:standardized]) {
+			[fm createDirectoryAtPath:standardized withIntermediateDirectories:YES attributes:nil error:&error];
+		}
+		if (error != nil || ![fm isWritableFileAtPath:standardized]) {
+			if (![fm fileExistsAtPath:defaultSandbox]) {
+				[fm createDirectoryAtPath:defaultSandbox withIntermediateDirectories:YES attributes:nil error:nil];
+			}
+			return defaultSandbox;
+		}
+		return standardized;
+	}
+
+	if (![fm fileExistsAtPath:defaultSandbox]) {
+		[fm createDirectoryAtPath:defaultSandbox withIntermediateDirectories:YES attributes:nil error:nil];
+	}
+	return defaultSandbox;
 }
 
 + (void)createChatCompletionWithMessages:(NSArray *)messages {

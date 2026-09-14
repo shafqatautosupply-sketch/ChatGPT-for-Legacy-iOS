@@ -41,7 +41,6 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.navigationItem.rightBarButtonItem = [[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemSave target:self action:@selector(saveTapped)] autorelease];
-    // Left bar button is left unset so the native back button automatically appears on the top-left
 }
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
@@ -191,8 +190,13 @@
 	self.workspaceField.autocapitalizationType = UITextAutocapitalizationTypeNone;
 	self.workspaceField.autocorrectionType = UITextAutocorrectionTypeNo;
     self.workspaceField.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+
+	NSString *docsDir = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) lastObject];
+	if ([docsDir length] == 0) docsDir = @"/var/mobile/Documents";
+	NSString *defaultSandbox = [docsDir stringByAppendingPathComponent:@"SandBox"];
+
 	NSString *savedWs = [defaults stringForKey:@"agent_workspace_dir"];
-	self.workspaceField.text = ([savedWs length] > 0 ? savedWs : @"/var/mobile/Documents/SandBox");
+	self.workspaceField.text = ([savedWs length] > 0 ? savedWs : defaultSandbox);
 
 	self.intervalField = [[[UITextField alloc] initWithFrame:CGRectMake(12.0f, 10.0f, 260.0f, 24.0f)] autorelease];
 	self.intervalField.borderStyle = UITextBorderStyleNone;
@@ -298,7 +302,7 @@
             editor = [[[CGAgentTextEditorViewController alloc] initWithTitle:@"Secret Paths" defaultsKey:@"agent_secret_paths" defaultValueString:@"/var/Keychains\n/var/mobile/Library/Mail\n/private/var/db\n/var/mobile/Library/Accounts"] autorelease];
             break;
         case 4:
-            editor = [[[CGAgentTextEditorViewController alloc] initWithTitle:@"Obfuscation Blocks" defaultsKey:@"agent_obfuscation_blocks" defaultValueString:@"base64\nxxd\nopenssl\neval\nexec\npython\nperl\nruby\nnc\nnetcat\ncurl\wget"] autorelease];
+            editor = [[[CGAgentTextEditorViewController alloc] initWithTitle:@"Obfuscation Blocks" defaultsKey:@"agent_obfuscation_blocks" defaultValueString:@"base64\nxxd\nopenssl\neval\nexec\npython\nperl\ruby\nnc\nnetcat\ncurl\wget"] autorelease];
             break;
         default:
             return;
@@ -311,11 +315,39 @@
 
 - (void)saveTapped {
 	NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-	[defaults setObject:[self.workspaceField.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] forKey:@"agent_workspace_dir"];
+	NSString *rawWs = [self.workspaceField.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+	
+	NSString *docsDir = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) lastObject];
+	if ([docsDir length] == 0) docsDir = @"/var/mobile/Documents";
+	NSString *defaultSandbox = [docsDir stringByAppendingPathComponent:@"SandBox"];
+
+	if ([rawWs length] == 0) {
+		rawWs = defaultSandbox;
+	}
+	NSString *standardizedWs = [rawWs stringByStandardizingPath];
+
+	NSFileManager *fm = [NSFileManager defaultManager];
+	NSError *error = nil;
+	if (![fm fileExistsAtPath:standardizedWs]) {
+		[fm createDirectoryAtPath:standardizedWs withIntermediateDirectories:YES attributes:nil error:&error];
+	}
+
+	if (error != nil) {
+		// Fallback if permission denied (Cocoa Error 513)
+		standardizedWs = defaultSandbox;
+		if (![fm fileExistsAtPath:defaultSandbox]) {
+			[fm createDirectoryAtPath:defaultSandbox withIntermediateDirectories:YES attributes:nil error:nil];
+		}
+	}
+
+	self.workspaceField.text = standardizedWs;
+
+	[defaults setObject:standardizedWs forKey:@"agent_workspace_dir"];
 	[defaults setDouble:[self.intervalField.text doubleValue] forKey:@"agent_min_request_interval"];
 	[defaults synchronize];
     
-	UIAlertView *alert = [[[UIAlertView alloc] initWithTitle:@"Saved" message:@"Settings updated." delegate:nil cancelButtonTitle:@"OK" otherButtonTitles:nil] autorelease];
+	NSString *msg = error ? [NSString stringWithFormat:@"No permission for that path (Cocoa error 513). Defaulted workspace to: %@", standardizedWs] : @"Settings and workspace directory updated successfully.";
+	UIAlertView *alert = [[[UIAlertView alloc] initWithTitle:@"Saved" message:msg delegate:nil cancelButtonTitle:@"OK" otherButtonTitles:nil] autorelease];
 	[alert show];
 }
 

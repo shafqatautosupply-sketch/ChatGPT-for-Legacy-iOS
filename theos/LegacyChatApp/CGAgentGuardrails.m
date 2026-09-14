@@ -98,19 +98,50 @@
 		return NO;
 	}
 
-	// Inspect arguments for hardblock and secret paths
+	// Retrieve workspace directory
+	NSString *workspace = [[NSUserDefaults standardUserDefaults] stringForKey:@"agent_workspace_dir"];
+	if ([workspace length] == 0) {
+		NSString *docsDir = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) lastObject];
+		if ([docsDir length] == 0) docsDir = @"/var/mobile/Documents";
+		workspace = [docsDir stringByAppendingPathComponent:@"SandBox"];
+	}
+	workspace = [workspace stringByStandardizingPath];
+	NSString *theos = @"/var/mobile/theos";
+
+	// Inspect arguments for hardblock paths, secret paths, path traversal, or escape outside workspace
 	for (NSUInteger i = 1; i < [tokens count]; i++) {
 		NSString *token = [tokens objectAtIndex:i];
-		NSString *standardToken = [token stringByStandardizingPath];
-		for (NSString *hb in [self hardBlockPaths]) {
-			if ([standardToken hasPrefix:hb] || [token rangeOfString:hb].location != NSNotFound) {
-				if (reasonOut) *reasonOut = [NSString stringWithFormat:@"BLOCKED (Guardrails): Access to hardblocked path '%@' is forbidden.", hb];
-				return NO;
-			}
+		if ([token hasPrefix:@"-"]) {
+			continue;
 		}
-		for (NSString *sp in [self secretPaths]) {
-			if ([standardToken hasPrefix:sp] || [token rangeOfString:sp].location != NSNotFound) {
-				if (reasonOut) *reasonOut = [NSString stringWithFormat:@"BLOCKED (Guardrails): Access to secret path '%@' is forbidden.", sp];
+
+		if ([token rangeOfString:@".."].location != NSNotFound) {
+			if (reasonOut) *reasonOut = @"BLOCKED (Guardrails): Path traversal ('..') outside workspace is forbidden.";
+			return NO;
+		}
+
+		if ([token hasPrefix:@"/"] || [token hasPrefix:@"./"] || [token rangeOfString:@"/"].location != NSNotFound) {
+			NSString *absolutePath = token;
+			if (![absolutePath isAbsolutePath]) {
+				continue;
+			}
+			absolutePath = [absolutePath stringByStandardizingPath];
+
+			for (NSString *hb in [self hardBlockPaths]) {
+				if ([absolutePath hasPrefix:hb]) {
+					if (reasonOut) *reasonOut = [NSString stringWithFormat:@"BLOCKED (Guardrails): Access to hardblocked path '%@' is forbidden.", hb];
+					return NO;
+				}
+			}
+			for (NSString *sp in [self secretPaths]) {
+				if ([absolutePath hasPrefix:sp]) {
+					if (reasonOut) *reasonOut = [NSString stringWithFormat:@"BLOCKED (Guardrails): Access to secret path '%@' is forbidden.", sp];
+					return NO;
+				}
+			}
+
+			if (![absolutePath hasPrefix:workspace] && ![absolutePath hasPrefix:theos]) {
+				if (reasonOut) *reasonOut = [NSString stringWithFormat:@"BLOCKED (Guardrails): Path '%@' is outside the allowed workspace or Theos directory.", token];
 				return NO;
 			}
 		}
