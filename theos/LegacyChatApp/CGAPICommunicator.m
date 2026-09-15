@@ -78,9 +78,14 @@ static BOOL g_isAgentCancelled = NO;
 + (void)cancelCurrentAgentTask { g_isAgentCancelled = YES; [self postStatus:NO]; }
 
 + (NSArray *)agentToolsDefinition {
+	NSSet *allowedSet = [CGAgentGuardrails allowedBinaries];
+	NSArray *sortedAllowed = [[allowedSet allObjects] sortedArrayUsingSelector:@selector(compare:)];
+	NSString *allowedListString = [sortedAllowed componentsJoinedByString:@", "];
+	NSString *toolDescription = [NSString stringWithFormat:@"Execute a terminal shell command locally within the workspace or Theos directory. Strictly protected by Whitelist Guardrails. ALLOWED BINARIES: %@. Shell chaining (&&, ;, |) and unlisted commands are strictly blocked.", allowedListString];
+
 	NSDictionary *runShellCommandTool = [NSDictionary dictionaryWithObjectsAndKeys:
 		@"runShellCommand", @"name",
-		@"Execute a terminal shell command locally within the workspace or Theos directory. Strictly protected by Whitelist Guardrails. ALLOWED BINARIES: make, git, clang, cc, c++, dpkg-deb, ldid, echo, cat, ls, cp, mv, mkdir, rm (within workspace/theos only, no wildcards/symlinks), grep, find, tar, zip, unzip, date. Shell chaining (&&, ;, |) and unlisted commands are strictly blocked.", @"description",
+		toolDescription, @"description",
 		[NSDictionary dictionaryWithObjectsAndKeys:
 			@"OBJECT", @"type",
 			[NSDictionary dictionaryWithObjectsAndKeys:
@@ -255,7 +260,7 @@ static BOOL g_isAgentCancelled = NO;
 }
 
 + (void)postMessageText:(NSString *__nullable)text assistantRole:(NSString *)role {
-	CGMessage *message = [role isEqualToString:@"assistant"] ? [CGAPIHelper assistantMessageWithText:text] : [CGMessage localMessageWithText:text];
+	CGMessage *message = [role isEqualToString:@"assistant"] ? [CGAPIHelper assistantMessageWithText:text] : [CGAPIHelper localMessageWithText:text];
 	dispatch_async(dispatch_get_main_queue(), ^{
 		[[NSNotificationCenter defaultCenter] postNotificationName:LCAPIResponseNotification object:message];
 	});
