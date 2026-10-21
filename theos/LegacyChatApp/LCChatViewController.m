@@ -171,8 +171,8 @@
 
 	if ([trimmedText length] == 0) return;
 
-    self.inputField.text = @"";
-    [self.inputField resignFirstResponder]; 
+	self.inputField.text = @"";
+	[self dismissKeyboard];
 
 	CGMessage *outgoingMessage = [[[CGMessage alloc] init] autorelease];
 	outgoingMessage.role = @"user";
@@ -192,8 +192,6 @@
     BOOL isTerminal = [CGAPICommunicator isTerminalModeEnabled];
     
     dispatch_async(dispatch_get_main_queue(), ^{
-        CGFloat startOfNewMessageY = self.chatTextView.contentSize.height;
-
         NSString *role = msg.role ?: @"user";
         NSString *content = [CGAPIHelper displayTextForMessage:msg];
         NSString *divider = @"==================================";
@@ -267,10 +265,21 @@
             self.fullChatAttributedString = [[[NSMutableAttributedString alloc] init] autorelease];
         }
         
+        NSMutableAttributedString *priorLog = [[[NSMutableAttributedString alloc] initWithAttributedString:self.fullChatAttributedString] autorelease];
         [self.fullChatAttributedString appendAttributedString:sectionAttrStr];
         self.chatTextView.attributedText = self.fullChatAttributedString;
         
-        CGPoint targetOffset = CGPointMake(0.0f, MAX(0.0f, startOfNewMessageY - 3.0f));
+        [self.chatTextView setNeedsLayout];
+        [self.chatTextView layoutIfNeeded];
+        
+        CGFloat constrainWidth = self.chatTextView.bounds.size.width > 0 ? self.chatTextView.bounds.size.width : [UIScreen mainScreen].bounds.size.width;
+        CGSize constrainSize = CGSizeMake(constrainWidth, CGFLOAT_MAX);
+        CGRect priorRect = [priorLog boundingRectWithSize:constrainSize options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingUsesFontLeading context:nil];
+        CGFloat startOfLastMsgY = priorRect.size.height;
+        
+        CGFloat maxOffset = MAX(0.0f, self.chatTextView.contentSize.height - self.chatTextView.bounds.size.height + self.chatTextView.contentInset.bottom);
+        CGPoint targetOffset = CGPointMake(0.0f, MIN(MAX(0.0f, startOfLastMsgY), maxOffset));
+        
         [UIView animateWithDuration:0.25f animations:^{
             self.chatTextView.contentOffset = targetOffset;
         }];
@@ -283,6 +292,7 @@
     
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         NSMutableAttributedString *fullLog = [[[NSMutableAttributedString alloc] init] autorelease];
+        NSMutableAttributedString *priorLog = [[[NSMutableAttributedString alloc] init] autorelease];
         NSString *divider = @"==================================";
         
         NSMutableParagraphStyle *centerStyle = [[[NSMutableParagraphStyle alloc] init] autorelease];
@@ -308,7 +318,8 @@
                 leftStyle, NSParagraphStyleAttributeName,
                 nil];
 
-            for (CGMessage *msg in messagesSnapshot) {
+            for (NSInteger i = 0; i < [messagesSnapshot count]; i++) {
+                CGMessage *msg = [messagesSnapshot objectAtIndex:i];
                 NSString *role = msg.role ?: @"user";
                 NSString *content = [CGAPIHelper displayTextForMessage:msg];
                 NSString *headerText = [role isEqualToString:@"user"] ? @"[USER >>]" : ([role isEqualToString:@"tool"] ? @"[TOOL OUTPUT >>]" : @"[AGENT >>]");
@@ -318,8 +329,14 @@
                 NSAttributedString *headerAttrSub = [[[NSAttributedString alloc] initWithString:headerBlock attributes:headerAttrs] autorelease];
                 NSAttributedString *contentAttrSub = [[[NSAttributedString alloc] initWithString:contentBlock attributes:contentAttrs] autorelease];
                 
-                [fullLog appendAttributedString:headerAttrSub];
-                [fullLog appendAttributedString:contentAttrSub];
+                NSMutableAttributedString *messageBlock = [[[NSMutableAttributedString alloc] init] autorelease];
+                [messageBlock appendAttributedString:headerAttrSub];
+                [messageBlock appendAttributedString:contentAttrSub];
+                
+                [fullLog appendAttributedString:messageBlock];
+                if (i < [messagesSnapshot count] - 1) {
+                    [priorLog appendAttributedString:messageBlock];
+                }
             }
         } else {
             UIFont *baseFont = [UIFont systemFontOfSize:14.0f];
@@ -338,7 +355,8 @@
                 leftStyle, NSParagraphStyleAttributeName,
                 nil];
 
-            for (CGMessage *msg in messagesSnapshot) {
+            for (NSInteger i = 0; i < [messagesSnapshot count]; i++) {
+                CGMessage *msg = [messagesSnapshot objectAtIndex:i];
                 NSString *role = msg.role ?: @"user";
                 NSString *content = [CGAPIHelper displayTextForMessage:msg];
                 NSString *headerText = [role isEqualToString:@"user"] ? @"You" : ([role isEqualToString:@"tool"] ? @"Tool Output" : @"Assistant");
@@ -352,8 +370,14 @@
                     [CGAPIHelper performSelector:@selector(applyMarkdownAttributesToAttributedString:) withObject:contentAttrSub];
                 }
                 
-                [fullLog appendAttributedString:headerAttrSub];
-                [fullLog appendAttributedString:contentAttrSub];
+                NSMutableAttributedString *messageBlock = [[[NSMutableAttributedString alloc] init] autorelease];
+                [messageBlock appendAttributedString:headerAttrSub];
+                [messageBlock appendAttributedString:contentAttrSub];
+                
+                [fullLog appendAttributedString:messageBlock];
+                if (i < [messagesSnapshot count] - 1) {
+                    [priorLog appendAttributedString:messageBlock];
+                }
             }
         }
         
@@ -361,7 +385,25 @@
             self.fullChatAttributedString = fullLog;
             self.chatTextView.text = nil;
             self.chatTextView.attributedText = self.fullChatAttributedString;
-            [self scrollToBottomAnimated:YES];
+            
+            [self.chatTextView setNeedsLayout];
+            [self.chatTextView layoutIfNeeded];
+            
+            if ([messagesSnapshot count] > 0) {
+                CGFloat constrainWidth = self.chatTextView.bounds.size.width > 0 ? self.chatTextView.bounds.size.width : [UIScreen mainScreen].bounds.size.width;
+                CGSize constrainSize = CGSizeMake(constrainWidth, CGFLOAT_MAX);
+                CGRect priorRect = [priorLog boundingRectWithSize:constrainSize options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingUsesFontLeading context:nil];
+                CGFloat startOfLastMsgY = priorRect.size.height;
+                
+                CGFloat maxOffset = MAX(0.0f, self.chatTextView.contentSize.height - self.chatTextView.bounds.size.height + self.chatTextView.contentInset.bottom);
+                CGPoint targetOffset = CGPointMake(0.0f, MIN(MAX(0.0f, startOfLastMsgY), maxOffset));
+                
+                [UIView animateWithDuration:0.25f animations:^{
+                    self.chatTextView.contentOffset = targetOffset;
+                }];
+            } else {
+                [self scrollToBottomAnimated:YES];
+            }
         });
     });
 }
@@ -402,10 +444,25 @@
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
     [self updateThemeStyling];
+    
     BOOL isTerminal = [CGAPICommunicator isTerminalModeEnabled];
     static BOOL lastTerminalState = NO;
-    if (isTerminal != lastTerminalState) {
+    
+    NSInteger currentLimit = [LCConversationStore loadedMessageLimit];
+    static NSInteger lastLimit = -1;
+    if (lastLimit == -1) lastLimit = currentLimit;
+
+    if (isTerminal != lastTerminalState || currentLimit != lastLimit) {
         lastTerminalState = isTerminal;
+        lastLimit = currentLimit;
+        
+        if ([self.allMessages count] > 0) {
+            if (currentLimit > 0 && [self.allMessages count] > currentLimit) {
+                self.messages = [NSMutableArray arrayWithArray:[self.allMessages subarrayWithRange:NSMakeRange([self.allMessages count] - currentLimit, currentLimit)]];
+            } else {
+                self.messages = [NSMutableArray arrayWithArray:self.allMessages];
+            }
+        }
         [self loadFullConversationIntoTerminal];
     }
 }

@@ -123,4 +123,75 @@
 	}
 }
 
++ (NSString *)readFileAtPath:(NSString *)path lineStart:(NSInteger)lineStart lineEnd:(NSInteger)lineEnd workspaceDirectory:(NSString *)workspaceDir {
+	NSString *targetWorkspace = workspaceDir;
+	if (!workspaceDir || [workspaceDir length] == 0) {
+		NSString *docsDir = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) lastObject];
+		if ([docsDir length] == 0) docsDir = @"/var/mobile/Documents";
+		targetWorkspace = [docsDir stringByAppendingPathComponent:@"SandBox"];
+	}
+	targetWorkspace = [targetWorkspace stringByStandardizingPath];
+
+	NSFileManager *fm = [NSFileManager defaultManager];
+	if (![fm fileExistsAtPath:targetWorkspace]) {
+		[fm createDirectoryAtPath:targetWorkspace withIntermediateDirectories:YES attributes:nil error:nil];
+	}
+
+	NSString *targetPath = path;
+	if (![path isAbsolutePath]) {
+		targetPath = [targetWorkspace stringByAppendingPathComponent:path];
+	}
+	targetPath = [targetPath stringByStandardizingPath];
+
+	if (![CGAgentGuardrails isPathAllowed:targetPath]) {
+		return @"Error: Cannot read outside of workspace or Theos directory.";
+	}
+
+	if (![fm fileExistsAtPath:targetPath]) {
+		return [NSString stringWithFormat:@"Error: File not found at path '%@'.", path];
+	}
+
+	NSError *error = nil;
+	NSString *content = [NSString stringWithContentsOfFile:targetPath encoding:NSUTF8StringEncoding error:&error];
+	if (!content) {
+		content = [NSString stringWithContentsOfFile:targetPath encoding:NSISOLatin1StringEncoding error:&error];
+	}
+
+	if (!content) {
+		return [NSString stringWithFormat:@"Error: Failed to read file at path '%@'. %@", path, [error localizedDescription]];
+	}
+
+	NSArray *lines = [content componentsSeparatedByString:@"\n"];
+	NSInteger totalLines = [lines count];
+
+	NSInteger start = lineStart;
+	if (start < 1) start = 1;
+
+	NSInteger end = lineEnd;
+	if (end < start) {
+		end = start + 199; // Default 200 lines max per read
+	}
+	if (end > totalLines) {
+		end = totalLines;
+	}
+
+	if (start > totalLines) {
+		return [NSString stringWithFormat:@"Error: line_start (%ld) exceeds total lines (%ld) of file.", (long)start, (long)totalLines];
+	}
+
+	NSMutableString *result = [NSMutableString string];
+	[result appendFormat:@"[Reading file '%@': lines %ld to %ld of %ld total lines]\n", path, (long)start, (long)end, (long)totalLines];
+
+	for (NSInteger i = start; i <= end; i++) {
+		NSString *lineStr = [lines objectAtIndex:(i - 1)];
+		[result appendFormat:@"%4ld | %@\n", (long)i, lineStr];
+	}
+
+	if ([result length] > 15000) {
+		result = [NSMutableString stringWithFormat:@"%@\n[Content truncated]", [result substringToIndex:15000]];
+	}
+
+	return result;
+}
+
 @end

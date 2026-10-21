@@ -117,7 +117,30 @@ static BOOL g_isAgentCancelled = NO;
 			nil], @"parameters",
 		nil];
 
-	NSArray *declarations = [NSArray arrayWithObjects:runShellCommandTool, writeFileTool, nil];
+	NSDictionary *readFileTool = [NSDictionary dictionaryWithObjectsAndKeys:
+		@"readFile", @"name",
+		@"Read text content from a file within the workspace securely, with optional line_start and line_end range parameters.", @"description",
+		[NSDictionary dictionaryWithObjectsAndKeys:
+			@"OBJECT", @"type",
+			[NSDictionary dictionaryWithObjectsAndKeys:
+				[NSDictionary dictionaryWithObjectsAndKeys:
+					@"STRING", @"type",
+					@"The relative file path inside the workspace", @"description",
+					nil], @"filepath",
+				[NSDictionary dictionaryWithObjectsAndKeys:
+					@"INTEGER", @"type",
+					@"Starting line number (1-based, optional)", @"description",
+					nil], @"line_start",
+				[NSDictionary dictionaryWithObjectsAndKeys:
+					@"INTEGER", @"type",
+					@"Ending line number (optional, defaults to 200 lines from start)", @"description",
+					nil], @"line_end",
+				nil], @"properties",
+			[NSArray arrayWithObject:@"filepath"], @"required",
+			nil], @"parameters",
+		nil];
+
+	NSArray *declarations = [NSArray arrayWithObjects:runShellCommandTool, writeFileTool, readFileTool, nil];
 	return [NSArray arrayWithObject:[NSDictionary dictionaryWithObject:declarations forKey:@"functionDeclarations"]];
 }
 
@@ -498,6 +521,13 @@ static BOOL g_isAgentCancelled = NO;
 						NSString *filepath = [arguments objectForKey:@"filepath"];
 						NSString *content = [arguments objectForKey:@"content"];
 						toolOutput = [CGAgentTools writeFileAtPath:filepath content:content workspaceDirectory:workspaceDir];
+					} else if ([funcName isEqualToString:@"readFile"]) {
+						NSString *filepath = [arguments objectForKey:@"filepath"];
+						id lineStartObj = [arguments objectForKey:@"line_start"];
+						id lineEndObj = [arguments objectForKey:@"line_end"];
+						NSInteger lineStart = lineStartObj ? [lineStartObj integerValue] : 1;
+						NSInteger lineEnd = lineEndObj ? [lineEndObj integerValue] : 0;
+						toolOutput = [CGAgentTools readFileAtPath:filepath lineStart:lineStart lineEnd:lineEnd workspaceDirectory:workspaceDir];
 					} else {
 						toolOutput = [NSString stringWithFormat:@"Error: Unknown tool function '%@'", funcName];
 					}
