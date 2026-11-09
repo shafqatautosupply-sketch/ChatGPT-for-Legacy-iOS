@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>providerName</key>
+	<string>Google Gemini</string>
+	<key>baseURL</key>
+	<string>https://generativelanguage.googleapis.com</string>
+	<key>c-aiModel</key>
+	<string>gemini-2.5-flash</string>
+	<key>apiKey</key>
+	<string></string>
+</dict>
+</plist>

@@ -1,8 +1,9 @@
-.DS_Store
-*.xcuserstate
-xcuserdata/
-
-# Theos build output
-theos/LegacyChatApp/.theos/
-theos/LegacyChatApp/packages/
+# Theos
+.theos/
+obj/
+packages/
 *.deb
+# macOS / Xcode noise
+.DS_Store
+xcuserdata/
+*.xcuserstate

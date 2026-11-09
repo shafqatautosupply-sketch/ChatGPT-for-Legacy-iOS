@@ -1,0 +1,9 @@
+Package: com.creative.agentic
+Name: Agentic
+Version: 1.1.2
+Architecture: iphoneos-arm
+Description: Autonomous AI Agent & chat workspace with local tool execution for iOS 6.
+Maintainer: creative
+Author: creative (Forked from ChatGPT for Legacy iOS by bagxml)
+Section: Applications
+Depends: firmware (>= 6.0)
