@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.3
+- **Pre-Execution Commands now expand `$NAME` and `${NAME}`** (not in single quotes), as a shell would.
+  Since 1.1.0 commands run without a shell, so `export PATH=$PATH:/var/mobile/theos/bin` set PATH to the
+  literal text `$PATH:/var/mobile/theos/bin`; `make` then could not find `sh`, `clang`, `ldid` and the like.
+  Nothing is executed during expansion (no `$(...)`, no backticks).
+
 ## 1.1.2
 - **Crash fix: the app died (SIGSEGV in the agent loop) as soon as the agent ran a second tool call.**
   Cause (introduced in 1.1.0): the loop guard kept an autoreleased string across iterations, but each

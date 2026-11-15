@@ -190,6 +190,35 @@ static NSString *AGGlobEscape(NSString *s) {
 
 #pragma mark - Environment
 
+/// Expands $NAME and ${NAME} from `env` (what earlier export lines and the defaults set).
+/// Unknown names expand to "". Nothing is executed: no $(...), no backticks.
+static NSString *AGExpandVariables(NSString *value, NSDictionary *env) {
+	if ([value rangeOfString:@"$"].location == NSNotFound) return value;
+	NSMutableString *out = [NSMutableString string];
+	NSUInteger length = [value length];
+	NSCharacterSet *nameChars = [NSCharacterSet characterSetWithCharactersInString:@"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_"];
+	for (NSUInteger i = 0; i < length; i++) {
+		unichar c = [value characterAtIndex:i];
+		if (c != '$' || i + 1 >= length) { [out appendFormat:@"%C", c]; continue; }
+		unichar next = [value characterAtIndex:i + 1];
+		NSString *name = nil;
+		if (next == '{') {
+			NSRange close = [value rangeOfString:@"}" options:0 range:NSMakeRange(i + 2, length - i - 2)];
+			if (close.location == NSNotFound) { [out appendFormat:@"%C", c]; continue; }
+			name = [value substringWithRange:NSMakeRange(i + 2, close.location - i - 2)];
+			i = close.location;
+		} else if ([nameChars characterIsMember:next] && !(next >= '0' && next <= '9')) {
+			NSUInteger j = i + 1;
+			while (j < length && [nameChars characterIsMember:[value characterAtIndex:j]]) j++;
+			name = [value substringWithRange:NSMakeRange(i + 1, j - i - 1)];
+			i = j - 1;
+		} else { [out appendFormat:@"%C", c]; continue; }
+		NSString *replacement = [env objectForKey:name];
+		if (replacement != nil) [out appendString:replacement];
+	}
+	return out;
+}
+
 + (NSArray *)environmentForWorkspace:(NSString *)workspace {
 	NSMutableDictionary *env = [NSMutableDictionary dictionary];
 	[env setObject:[[AGGuardrails execSearchPath] componentsJoinedByString:@":"] forKey:@"PATH"];
@@ -210,9 +239,13 @@ static NSString *AGGlobEscape(NSString *s) {
 		if (eq.location == NSNotFound || eq.location == 0) continue;
 		NSString *key = [s substringToIndex:eq.location];
 		NSString *value = [s substringFromIndex:eq.location + 1];
-		if ([value length] >= 2 && (([value hasPrefix:@"\""] && [value hasSuffix:@"\""]) || ([value hasPrefix:@"'"] && [value hasSuffix:@"'"]))) {
-			value = [value substringWithRange:NSMakeRange(1, [value length] - 2)];
-		}
+		BOOL singleQuoted = ([value length] >= 2 && [value hasPrefix:@"'"] && [value hasSuffix:@"'"]);
+		BOOL doubleQuoted = ([value length] >= 2 && [value hasPrefix:@"\""] && [value hasSuffix:@"\""]);
+		if (singleQuoted || doubleQuoted) value = [value substringWithRange:NSMakeRange(1, [value length] - 2)];
+		// Like a shell: $PATH / ${THEOS} are expanded unless the value is in single quotes.
+		// Without this, "export PATH=$PATH:/var/mobile/theos/bin" made PATH the literal text
+		// "$PATH:/var/mobile/theos/bin" and `make` could no longer find sh, clang, ldid...
+		if (!singleQuoted) value = AGExpandVariables(value, env);
 		NSCharacterSet *bad = [[NSCharacterSet characterSetWithCharactersInString:@"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_"] invertedSet];
 		if ([key rangeOfCharacterFromSet:bad].location != NSNotFound) continue;
 		[env setObject:value forKey:key];

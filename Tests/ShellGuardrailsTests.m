@@ -77,5 +77,18 @@ int main(){ @autoreleasepool {
   { __block int n=0; BOOL (^c)(void)=^BOOL{ return ++n>3; }; NSDate *t=[NSDate date]; NSString *o=[AGShellRunner runCommandLine:@"sleep 20" workspace:@"/tmp/agws/ws" isCancelled:c]; double el=-[t timeIntervalSinceNow]; BOOL ok=el<3 && [o rangeOfString:@"cancelled"].location!=NSNotFound; printf("%s Stop button cancels running command in %.1fs\n", ok?"PASS":"FAIL", el); if(!ok)fails++; }
   system("head -c 3000000 /dev/zero | tr '\\0' 'a' > /tmp/agws/ws/big.txt; echo ENDMARK >> /tmp/agws/ws/big.txt");
   { NSString *o=R(@"cat big.txt"); BOOL ok=[o rangeOfString:@"ENDMARK"].location!=NSNotFound && [o rangeOfString:@"omitted"].location!=NSNotFound; printf("%s 3MB output keeps the END (%lu chars)\n", ok?"PASS":"FAIL",(unsigned long)[o length]); if(!ok)fails++; }
+  printf("=== pre-execution exports ===\n");
+  [d setObject:[NSArray arrayWithObjects:@"export THEOS=/tmp/agws/theos", @"export PATH=$PATH:$THEOS/bin", @"export SDK=\"${THEOS}/sdks\"", @"export LIT='$THEOS'", @"export UNKNOWN=a${NOPE}b", @"export PRICE=5$", nil] forKey:@"agent_pre_execution_commands"];
+  [d setObject:[[AGGuardrails defaultAllowedBinaries] arrayByAddingObject:@"env"] forKey:@"agent_allowed_binaries"];
+  { NSString *o=R(@"env");
+    NSString *path=nil; for(NSString *l in [o componentsSeparatedByString:@"\n"]) if([l hasPrefix:@"PATH="]) path=l;
+    BOOL ok=path && [path rangeOfString:@"/usr/bin"].location!=NSNotFound && [path hasSuffix:@":/tmp/agws/theos/bin"] && [path rangeOfString:@"$"].location==NSNotFound;
+    printf("%s export PATH=$PATH:$THEOS/bin keeps the default PATH and appends theos/bin: %s\n", ok?"PASS":"FAIL", [path UTF8String]); if(!ok)fails++; }
+  { NSString *o=R(@"env");
+    BOOL ok1=[o rangeOfString:@"\nSDK=/tmp/agws/theos/sdks"].location!=NSNotFound, ok2=[o rangeOfString:@"\nLIT=$THEOS"].location!=NSNotFound, ok3=[o rangeOfString:@"\nUNKNOWN=ab"].location!=NSNotFound, ok4=[o rangeOfString:@"\nPRICE=5$"].location!=NSNotFound;
+    printf("%s ${VAR} in double quotes expands\n%s single quotes stay literal\n%s unknown variable expands to empty\n%s lone $ kept\n", ok1?"PASS":"FAIL", ok2?"PASS":"FAIL", ok3?"PASS":"FAIL", ok4?"PASS":"FAIL"); if(!ok1)fails++; if(!ok2)fails++; if(!ok3)fails++; if(!ok4)fails++; }
+  { // the old behaviour for comparison is what a literal PATH would do: nothing is findable
+    [d setObject:[NSArray arrayWithObject:@"export PATH=/nonexistent"] forKey:@"agent_pre_execution_commands"];
+    NSString *o=R(@"echo hi"); BOOL ok=[o hasPrefix:@"[GUARDRAIL"]==NO; printf("%s explicit PATH does not affect how the app itself finds whitelisted binaries\n", ok?"PASS":"FAIL"); if(!ok)fails++; }
   printf("\n%s (%d failures)\n", fails?"SOME TESTS FAILED":"ALL PASSED", fails);
   return fails; }}

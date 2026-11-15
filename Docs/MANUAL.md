@@ -33,7 +33,7 @@ Tools: `runShellCommand`, `readFile` (line ranges, tells you where to continue),
 - *Command timeout*: a command running longer is killed (default 120 s).
 - *Max agent steps*: model requests per task before it stops (default 40).
 - *Allow insecure TLS*: off by default. See `SECURITY.md` before turning it on.
-- *Pre-Execution Commands*: `export NAME=value` lines added to the environment of every command.
+- *Pre-Execution Commands*: `export NAME=value` lines added to the environment of every command. `$NAME` and `${NAME}` are expanded (so `export PATH=$PATH:/var/mobile/theos/bin` works); one variable per line; nothing else is executed. The default search path already includes `<theos>/bin`, so a PATH line is rarely needed; `export THEOS=/var/mobile/theos` is the one Theos needs.
 - *Allowed Binaries*: whitelist. *Hard Block / Secret Paths*: extra paths to forbid, on top of the built-in ones.
 
 **Chat History Limits**
