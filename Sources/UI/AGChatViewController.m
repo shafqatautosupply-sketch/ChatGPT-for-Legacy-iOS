@@ -1,5 +1,5 @@
 #import "AGChatViewController.h"
-#import "AGGeminiClient.h"
+#import "AGChatClient.h"
 #import "AGProviderConfig.h"
 #import "AGConversation.h"
 #import "AGMessage.h"
@@ -69,7 +69,7 @@ static const CGFloat AGTextViewTopPadding = 8.0f;
 		_segmentLengths = [[NSMutableArray alloc] init];
 		_segmentHeights = [[NSMutableArray alloc] init];
 		_lastLimit = -1;
-		self.title = [AGGeminiClient isAgentModeEnabled] ? @"Agent" : @"Chat";
+		self.title = [AGChatClient isAgentModeEnabled] ? @"Agent" : @"Chat";
 	}
 	return self;
 }
@@ -122,8 +122,8 @@ static const CGFloat AGTextViewTopPadding = 8.0f;
 }
 
 - (void)updateThemeStyling {
-    BOOL isTerminal = [AGGeminiClient isTerminalModeEnabled];
-    BOOL isAgent = [AGGeminiClient isAgentModeEnabled];
+    BOOL isTerminal = [AGChatClient isTerminalModeEnabled];
+    BOOL isAgent = [AGChatClient isAgentModeEnabled];
     self.title = isAgent ? @"Agent" : @"Chat";
 
     if (isTerminal) {
@@ -197,8 +197,8 @@ static const CGFloat AGTextViewTopPadding = 8.0f;
 }
 
 - (void)appendSegmentForMessage:(AGMessage *)message {
-    BOOL terminal = [AGGeminiClient isTerminalModeEnabled];
-    BOOL markdown = [AGGeminiClient isMarkdownEnabled];
+    BOOL terminal = [AGChatClient isTerminalModeEnabled];
+    BOOL markdown = [AGChatClient isMarkdownEnabled];
     NSAttributedString *segment = [AGMessageRenderer segmentForMessage:message terminal:terminal markdown:markdown];
     double height = [AGMessageRenderer heightForMessage:message segment:segment width:[self textWidth]];
 
@@ -237,8 +237,8 @@ static const CGFloat AGTextViewTopPadding = 8.0f;
         : [NSArray arrayWithArray:self.allMessages];
     self.messages = [NSMutableArray arrayWithArray:window];
 
-    BOOL terminal = [AGGeminiClient isTerminalModeEnabled];
-    BOOL markdown = [AGGeminiClient isMarkdownEnabled];
+    BOOL terminal = [AGChatClient isTerminalModeEnabled];
+    BOOL markdown = [AGChatClient isMarkdownEnabled];
     NSUInteger generation = ++self.rebuildGeneration;
     NSArray *snapshot = window;
 
@@ -275,7 +275,7 @@ static const CGFloat AGTextViewTopPadding = 8.0f;
     NSString *trimmedText = [self.inputField.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
 
     if (self.requestInFlight) {
-        [AGGeminiClient cancelCurrentAgentTask];
+        [AGChatClient cancelCurrentAgentTask];
         self.requestInFlight = NO;
         [self updateSendButtonTitle];
         return;
@@ -292,7 +292,7 @@ static const CGFloat AGTextViewTopPadding = 8.0f;
 
     self.requestInFlight = YES;
     [self updateSendButtonTitle];
-    [AGGeminiClient createChatCompletionWithMessages:self.allMessages];
+    [AGChatClient createChatCompletionWithMessages:self.allMessages];
 }
 
 - (void)updateSendButtonTitle {
@@ -333,8 +333,8 @@ static const CGFloat AGTextViewTopPadding = 8.0f;
     [super viewWillAppear:animated];
     [self updateThemeStyling];
 
-    BOOL terminal = [AGGeminiClient isTerminalModeEnabled];
-    BOOL markdown = [AGGeminiClient isMarkdownEnabled];
+    BOOL terminal = [AGChatClient isTerminalModeEnabled];
+    BOOL markdown = [AGChatClient isMarkdownEnabled];
     NSInteger limit = [AGConversationStore loadedMessageLimit];
     if (self.lastLimit == -1) { self.lastLimit = limit; self.lastTerminalState = terminal; self.lastMarkdownState = markdown; }
 
@@ -390,7 +390,7 @@ static const CGFloat AGTextViewTopPadding = 8.0f;
 /// Switching or clearing a chat must stop the agent: its replies would otherwise
 /// be appended to whichever chat is on screen when they arrive.
 - (void)stopRunningRequest {
-    [AGGeminiClient cancelCurrentAgentTask];
+    [AGChatClient cancelCurrentAgentTask];
     self.requestInFlight = NO;
     [self updateSendButtonTitle];
 }
@@ -427,7 +427,7 @@ static const CGFloat AGTextViewTopPadding = 8.0f;
     if (![message isKindOfClass:[AGMessage class]]) return;
     // Ignore output of a run that was stopped or replaced (e.g. the user switched chats).
     NSNumber *run = [[notification userInfo] objectForKey:AGAPIRunUserInfoKey];
-    if (run != nil && [run unsignedIntegerValue] != [AGGeminiClient currentRunID]) return;
+    if (run != nil && [run unsignedIntegerValue] != [AGChatClient currentRunID]) return;
 
     [self addMessage:message];
     [self persistCurrentConversation];
@@ -435,19 +435,19 @@ static const CGFloat AGTextViewTopPadding = 8.0f;
 
 - (void)apiStatusDidChange:(NSNotification *)notification {
     NSNumber *run = [[notification userInfo] objectForKey:AGAPIRunUserInfoKey];
-    if (run != nil && [run unsignedIntegerValue] != [AGGeminiClient currentRunID]) return;
+    if (run != nil && [run unsignedIntegerValue] != [AGChatClient currentRunID]) return;
     self.requestInFlight = [[notification object] boolValue];
     [self updateSendButtonTitle];
 }
 
 - (void)terminalModeChanged:(NSNotification *)notification {
     [self updateThemeStyling];
-    self.lastTerminalState = [AGGeminiClient isTerminalModeEnabled];
+    self.lastTerminalState = [AGChatClient isTerminalModeEnabled];
     if ([self.allMessages count] > 0) [self rebuildLog];
 }
 
 - (void)markdownModeChanged:(NSNotification *)notification {
-    self.lastMarkdownState = [AGGeminiClient isMarkdownEnabled];
+    self.lastMarkdownState = [AGChatClient isMarkdownEnabled];
     if ([self.allMessages count] > 0) [self rebuildLog];
 }
 

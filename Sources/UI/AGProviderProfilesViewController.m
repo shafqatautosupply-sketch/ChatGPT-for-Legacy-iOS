@@ -2,21 +2,26 @@
 #import "AGProviderConfig.h"
 #import "AGProviderProfileEditorViewController.h"
 
+enum { AGSectionGemini = 0, AGSectionOpenAI = 1 };
+
 @interface AGProviderProfilesViewController ()
 
-@property (nonatomic, retain) NSMutableArray *profiles;
+@property (nonatomic, retain) NSArray *geminiProfiles;
+@property (nonatomic, retain) NSArray *openAIProfiles;
 
 @end
 
 @implementation AGProviderProfilesViewController
 
-@synthesize profiles = _profiles;
+@synthesize geminiProfiles = _geminiProfiles;
+@synthesize openAIProfiles = _openAIProfiles;
 
 - (id)init {
 	self = [super initWithStyle:UITableViewStyleGrouped];
 	if (self) {
 		self.title = @"Model Configurations";
-		self.profiles = [NSMutableArray array];
+		self.geminiProfiles = [NSArray array];
+		self.openAIProfiles = [NSArray array];
 	}
 	return self;
 }
@@ -26,104 +31,115 @@
 	if (UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad) {
 		self.tableView.rowHeight = 56.0f;
 	}
-	self.navigationItem.rightBarButtonItem = [[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAdd target:self action:@selector(addTapped)] autorelease];
+}
+
+- (void)reloadProfiles {
+	self.geminiProfiles = [AGProviderConfig providerProfilesOfType:AGProviderTypeGemini];
+	self.openAIProfiles = [AGProviderConfig providerProfilesOfType:AGProviderTypeOpenAI];
+	[self.tableView reloadData];
 }
 
 - (void)viewWillAppear:(BOOL)animated {
 	[super viewWillAppear:animated];
-	self.profiles = [NSMutableArray arrayWithArray:[AGProviderConfig providerProfiles]];
-	[self.tableView reloadData];
+	[self reloadProfiles];
 }
 
-- (void)addTapped {
-	AGProviderProfileEditorViewController *controller = [[[AGProviderProfileEditorViewController alloc] initForNewProfile] autorelease];
-	[self.navigationController pushViewController:controller animated:YES];
+- (NSArray *)profilesForSection:(NSInteger)section {
+	return (section == AGSectionGemini) ? self.geminiProfiles : self.openAIProfiles;
+}
+
+- (NSString *)typeForSection:(NSInteger)section {
+	return (section == AGSectionGemini) ? AGProviderTypeGemini : AGProviderTypeOpenAI;
 }
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-	return 1;
+	return 2;
 }
 
-- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-	return MAX((NSInteger)[self.profiles count], 1);
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
+	return (section == AGSectionGemini) ? @"Google Gemini" : @"OpenAI Compatible";
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-	return @"Tap a configuration row to make it active. Tap the disclosure button to edit an existing configuration.";
+	if (section == AGSectionGemini) {
+		return @"Tap a configuration to make it active (✓). Tap ⓘ to edit, swipe to delete.";
+	}
+	return @"Any server that speaks the OpenAI Chat Completions API: OpenAI, OpenRouter, DeepSeek, Groq, LM Studio, Ollama and others. Base URL example: https://api.openai.com/v1. The key is sent as a Bearer token.";
+}
+
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+	return (NSInteger)[[self profilesForSection:section] count] + 1; // + the "Add" row
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-	static NSString *CellIdentifier = @"ProfileCell";
-	UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:CellIdentifier];
+	NSArray *profiles = [self profilesForSection:indexPath.section];
+	BOOL isAddRow = (indexPath.row >= (NSInteger)[profiles count]);
+
+	NSString *identifier = isAddRow ? @"AddCell" : @"ProfileCell";
+	UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:identifier];
 	if (cell == nil) {
-		cell = [[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:CellIdentifier] autorelease];
+		cell = [[[UITableViewCell alloc] initWithStyle:(isAddRow ? UITableViewCellStyleDefault : UITableViewCellStyleSubtitle) reuseIdentifier:identifier] autorelease];
 	}
 
-	if ([self.profiles count] == 0) {
-		cell.textLabel.text = @"No model configurations yet";
-		cell.detailTextLabel.text = @"Tap + to add your first provider.";
-		cell.selectionStyle = UITableViewCellSelectionStyleNone;
+	if (isAddRow) {
+		cell.textLabel.text = (indexPath.section == AGSectionGemini) ? @"Add Google Gemini…" : @"Add OpenAI Compatible…";
+		cell.textLabel.textColor = [UIColor colorWithRed:0.0f green:0.35f blue:0.8f alpha:1.0f];
 		cell.accessoryType = UITableViewCellAccessoryNone;
-		cell.imageView.image = nil;
+		cell.selectionStyle = UITableViewCellSelectionStyleBlue;
 		return cell;
 	}
 
-	NSDictionary *profile = [self.profiles objectAtIndex:indexPath.row];
-	cell.textLabel.text = [profile objectForKey:@"providerName"];
-	cell.detailTextLabel.text = [NSString stringWithFormat:@"%@  %@",
-		([profile objectForKey:@"c-aiModel"] ?: @""),
-		([profile objectForKey:@"baseURL"] ?: @"")];
+	NSDictionary *profile = [profiles objectAtIndex:(NSUInteger)indexPath.row];
+	BOOL isActive = [[[profile objectForKey:@"identifier"] description] isEqualToString:[AGProviderConfig activeProviderProfileIdentifier]];
+	NSString *name = [profile objectForKey:@"providerName"] ?: @"";
+	cell.textLabel.text = isActive ? [NSString stringWithFormat:@"✓ %@", name] : name;
+	cell.detailTextLabel.text = [NSString stringWithFormat:@"%@  %@", ([profile objectForKey:@"c-aiModel"] ?: @""), ([profile objectForKey:@"baseURL"] ?: @"")];
 	cell.selectionStyle = UITableViewCellSelectionStyleBlue;
 	cell.accessoryType = UITableViewCellAccessoryDetailDisclosureButton;
 	cell.editingAccessoryType = UITableViewCellAccessoryDetailDisclosureButton;
-	if ([[[profile objectForKey:@"identifier"] description] isEqualToString:[AGProviderConfig activeProviderProfileIdentifier]]) {
-		cell.imageView.image = nil;
-		cell.textLabel.text = [NSString stringWithFormat:@"✓ %@", [profile objectForKey:@"providerName"]];
-	} else {
-		cell.imageView.image = nil;
-	}
 	return cell;
 }
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
 	[tableView deselectRowAtIndexPath:indexPath animated:YES];
-	if ([self.profiles count] == 0) {
+	NSArray *profiles = [self profilesForSection:indexPath.section];
+
+	if (indexPath.row >= (NSInteger)[profiles count]) {
+		AGProviderProfileEditorViewController *controller = [[[AGProviderProfileEditorViewController alloc] initForNewProfileOfType:[self typeForSection:indexPath.section]] autorelease];
+		[self.navigationController pushViewController:controller animated:YES];
 		return;
 	}
 
-	NSDictionary *profile = [self.profiles objectAtIndex:indexPath.row];
+	NSDictionary *profile = [profiles objectAtIndex:(NSUInteger)indexPath.row];
 	[AGProviderConfig activateProviderProfileWithIdentifier:[profile objectForKey:@"identifier"]];
-	self.profiles = [NSMutableArray arrayWithArray:[AGProviderConfig providerProfiles]];
-	[self.tableView reloadData];
+	[self reloadProfiles];
 }
 
 - (BOOL)tableView:(UITableView *)tableView canEditRowAtIndexPath:(NSIndexPath *)indexPath {
-	return ([self.profiles count] > 0);
+	return indexPath.row < (NSInteger)[[self profilesForSection:indexPath.section] count];
 }
 
 - (void)tableView:(UITableView *)tableView commitEditingStyle:(UITableViewCellEditingStyle)editingStyle forRowAtIndexPath:(NSIndexPath *)indexPath {
-	if (editingStyle != UITableViewCellEditingStyleDelete || [self.profiles count] == 0) {
-		return;
-	}
+	NSArray *profiles = [self profilesForSection:indexPath.section];
+	if (editingStyle != UITableViewCellEditingStyleDelete || indexPath.row >= (NSInteger)[profiles count]) return;
 
-	NSDictionary *profile = [self.profiles objectAtIndex:indexPath.row];
+	NSDictionary *profile = [profiles objectAtIndex:(NSUInteger)indexPath.row];
 	[AGProviderConfig deleteProviderProfileWithIdentifier:[profile objectForKey:@"identifier"]];
-	self.profiles = [NSMutableArray arrayWithArray:[AGProviderConfig providerProfiles]];
-	[tableView reloadData];
+	[self reloadProfiles];
 }
 
 - (void)tableView:(UITableView *)tableView accessoryButtonTappedForRowWithIndexPath:(NSIndexPath *)indexPath {
-	if ([self.profiles count] == 0) {
-		return;
-	}
+	NSArray *profiles = [self profilesForSection:indexPath.section];
+	if (indexPath.row >= (NSInteger)[profiles count]) return;
 
-	NSDictionary *profile = [self.profiles objectAtIndex:indexPath.row];
+	NSDictionary *profile = [profiles objectAtIndex:(NSUInteger)indexPath.row];
 	AGProviderProfileEditorViewController *controller = [[[AGProviderProfileEditorViewController alloc] initWithProfile:profile] autorelease];
 	[self.navigationController pushViewController:controller animated:YES];
 }
 
 - (void)dealloc {
-	[_profiles release];
+	[_geminiProfiles release];
+	[_openAIProfiles release];
 	[super dealloc];
 }
 

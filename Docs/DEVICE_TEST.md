@@ -30,3 +30,11 @@ run on a device by its author. Please go through this once after installing.
 ## Tokens
 14. Settings > "Last request" shows prompt/cached/output counts. In a long agent session the prompt count should
     level off instead of growing every step once the Context budget is reached.
+
+## OpenAI-compatible endpoint (1.2.0)
+15. Settings > Model Configurations shows two sections. In "OpenAI Compatible" add a configuration
+    (base URL ending in /v1, model, key), tap it: a check mark appears.
+16. Pure chat: send "hi" and get an answer. Then Agent mode: "list the files in the workspace": the agent runs `ls`
+    and answers. Settings shows the token row (cached may be 0: not every server reports it).
+17. Switch back to a Gemini configuration and send a message in a NEW chat: works as before.
+18. If a host fails with a certificate error, see SECURITY.md (older roots are not in the bundled CA list).

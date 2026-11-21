@@ -8,6 +8,7 @@
 @property (nonatomic, retain) NSMutableDictionary *textFields;
 @property (nonatomic, retain) NSString *editingIdentifier;
 @property (nonatomic, assign) BOOL creatingNewProfile;
+@property (nonatomic, retain) NSString *providerType;
 
 @end
 
@@ -18,23 +19,28 @@
 @synthesize textFields = _textFields;
 @synthesize editingIdentifier = _editingIdentifier;
 @synthesize creatingNewProfile = _creatingNewProfile;
+@synthesize providerType = _providerType;
 
-+ (NSMutableDictionary *)defaultDraftValues {
-	NSMutableDictionary *values = [NSMutableDictionary dictionary];
-	[values setObject:@"Google Gemini" forKey:@"providerName"];
-	[values setObject:@"https://generativelanguage.googleapis.com" forKey:@"baseURL"];
-	[values setObject:@"gemini-2.5-flash" forKey:@"c-aiModel"];
-	[values setObject:@"" forKey:@"apiKey"];
-	return values;
++ (NSMutableDictionary *)defaultDraftValuesForType:(NSString *)type {
+	return [NSMutableDictionary dictionaryWithDictionary:[AGProviderConfig factoryValuesForType:type]];
+}
+
+- (BOOL)isOpenAI {
+	return [self.providerType isEqualToString:AGProviderTypeOpenAI];
 }
 
 - (id)initForNewProfile {
+	return [self initForNewProfileOfType:AGProviderTypeGemini];
+}
+
+- (id)initForNewProfileOfType:(NSString *)providerType {
 	self = [super initWithStyle:UITableViewStyleGrouped];
 	if (self) {
-		self.title = @"New Configuration";
+		self.providerType = [providerType isEqualToString:AGProviderTypeOpenAI] ? AGProviderTypeOpenAI : AGProviderTypeGemini;
+		self.title = [self isOpenAI] ? @"New OpenAI Compatible" : @"New Google Gemini";
 		self.creatingNewProfile = YES;
 		self.fieldOrder = [NSArray arrayWithObjects:@"providerName", @"baseURL", @"c-aiModel", @"apiKey", nil];
-		self.draftValues = [[self class] defaultDraftValues];
+		self.draftValues = [[self class] defaultDraftValuesForType:self.providerType];
 		self.textFields = [NSMutableDictionary dictionary];
 	}
 	return self;
@@ -43,14 +49,16 @@
 - (id)initWithProfile:(NSDictionary *)profile {
 	self = [super initWithStyle:UITableViewStyleGrouped];
 	if (self) {
-		self.title = @"Edit Configuration";
+		self.providerType = [AGProviderConfig providerTypeOfProfile:profile];
+		self.title = [self isOpenAI] ? @"Edit OpenAI Compatible" : @"Edit Google Gemini";
 		self.creatingNewProfile = NO;
 		self.editingIdentifier = [profile objectForKey:@"identifier"];
 		self.fieldOrder = [NSArray arrayWithObjects:@"providerName", @"baseURL", @"c-aiModel", @"apiKey", nil];
-		self.draftValues = [[self class] defaultDraftValues];
+		self.draftValues = [[self class] defaultDraftValuesForType:self.providerType];
 		if ([profile isKindOfClass:[NSDictionary class]]) {
 			[self.draftValues addEntriesFromDictionary:profile];
 		}
+		[self.draftValues setObject:self.providerType forKey:@"providerType"]; // the type never changes when editing
 		self.textFields = [NSMutableDictionary dictionary];
 	}
 	return self;
@@ -74,10 +82,11 @@
 }
 
 - (NSString *)placeholderForFieldKey:(NSString *)fieldKey {
-	if ([fieldKey isEqualToString:@"providerName"]) return @"Google Gemini";
-	if ([fieldKey isEqualToString:@"baseURL"]) return @"https://generativelanguage.googleapis.com";
-	if ([fieldKey isEqualToString:@"c-aiModel"]) return @"gemini-2.5-flash";
-	if ([fieldKey isEqualToString:@"apiKey"]) return @"Paste your key (AIza...)";
+	BOOL openAI = [self isOpenAI];
+	if ([fieldKey isEqualToString:@"providerName"]) return openAI ? @"OpenAI, DeepSeek, LM Studio..." : @"Google Gemini";
+	if ([fieldKey isEqualToString:@"baseURL"]) return openAI ? @"https://api.openai.com/v1" : @"https://generativelanguage.googleapis.com";
+	if ([fieldKey isEqualToString:@"c-aiModel"]) return openAI ? @"gpt-4o-mini" : @"gemini-2.5-flash";
+	if ([fieldKey isEqualToString:@"apiKey"]) return openAI ? @"Paste your key (sk-...)" : @"Paste your key (AIza...)";
 	return @"";
 }
 
@@ -100,6 +109,9 @@
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
+	if ([self isOpenAI]) {
+		return @"Uses POST {Base URL}/chat/completions with the key as a Bearer token. Base URL usually ends in /v1 (https://api.openai.com/v1, https://openrouter.ai/api/v1, http://192.168.1.5:1234/v1). The model must support tool calling for Agent Mode. Plain http:// sends the key unencrypted.";
+	}
 	return @"Configured for Google Gemini Native API. The endpoint URL is automatically constructed using Base URL and Model name.";
 }
 
@@ -192,6 +204,7 @@
 - (void)dealloc {
 	[_fieldOrder release]; [_draftValues release]; [_textFields release];
 	[_editingIdentifier release];
+	[_providerType release];
 	[super dealloc];
 }
 

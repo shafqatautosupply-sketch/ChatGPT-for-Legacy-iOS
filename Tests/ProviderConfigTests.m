@@ -23,4 +23,24 @@ int main(){ @autoreleasepool {
   CHECK("no thinkingConfig sent by default (2.5 models reject thinkingLevel)", [AGProviderConfig generationConfigForCurrentModel]==nil);
   [d setObject:@"low" forKey:@"ag_thinking_level"]; CHECK("thinking level is opt-in", [[[[AGProviderConfig generationConfigForCurrentModel] objectForKey:@"thinkingConfig"] objectForKey:@"thinkingLevel"] isEqual:@"low"]);
   CHECK("URL builds", [[[AGProviderConfig configuredChatCompletionURL] absoluteString] rangeOfString:@"/v1beta/models/gemini-2.5-"].location!=NSNotFound && [[[AGProviderConfig configuredChatCompletionURL] absoluteString] hasSuffix:@":generateContent"]);
+  // ---- OpenAI-compatible profiles ----
+  CHECK("profiles saved before this feature (no providerType) count as Gemini", [[AGProviderConfig providerProfilesOfType:AGProviderTypeGemini] count]==[[AGProviderConfig providerProfiles] count] && [[AGProviderConfig providerProfilesOfType:AGProviderTypeOpenAI] count]==0);
+  CHECK("legacy active profile: Gemini URL + x-goog-api-key", ![AGProviderConfig isOpenAICompatibleActive]);
+  NSMutableURLRequest *rq=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"http://x"]]; [AGProviderConfig applyAuthorizationHeadersToRequest:rq withAPIKey:@"K"];
+  CHECK("Gemini auth header", [[rq valueForHTTPHeaderField:@"x-goog-api-key"] isEqual:@"K"] && [rq valueForHTTPHeaderField:@"Authorization"]==nil);
+  [AGProviderConfig createProviderProfileWithValues:[NSDictionary dictionaryWithObjectsAndKeys:AGProviderTypeOpenAI,@"providerType",@"DeepSeek",@"providerName",@"https://api.deepseek.com/",@"baseURL",@"deepseek-chat",@"c-aiModel",@"sk-1",@"apiKey",nil]];
+  CHECK("new OpenAI-compatible profile is active and typed", [AGProviderConfig isOpenAICompatibleActive] && [[AGProviderConfig providerProfilesOfType:AGProviderTypeOpenAI] count]==1 && [[AGProviderConfig providerProfilesOfType:AGProviderTypeGemini] count]==[[AGProviderConfig providerProfiles] count]-1);
+  CHECK("base URL without /v1 -> .../chat/completions (trailing slash ignored)", [[[AGProviderConfig configuredChatCompletionURL] absoluteString] isEqual:@"https://api.deepseek.com/chat/completions"]);
+  rq=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"http://x"]]; [AGProviderConfig applyAuthorizationHeadersToRequest:rq withAPIKey:@"sk-1"];
+  CHECK("OpenAI auth header is Bearer, no x-goog-api-key", [[rq valueForHTTPHeaderField:@"Authorization"] isEqual:@"Bearer sk-1"] && [rq valueForHTTPHeaderField:@"x-goog-api-key"]==nil);
+  CHECK("no Gemini generationConfig for OpenAI", [AGProviderConfig generationConfigForCurrentModel]==nil);
+  NSString *oid=[AGProviderConfig activeProviderProfileIdentifier];
+  [AGProviderConfig updateProviderProfileWithIdentifier:oid values:[NSDictionary dictionaryWithObjectsAndKeys:@"DeepSeek",@"providerName",@"http://192.168.1.5:1234/v1",@"baseURL",@"local-model",@"c-aiModel",@"",@"apiKey",nil]];
+  CHECK("editing without passing a type keeps the OpenAI type", [AGProviderConfig isOpenAICompatibleActive] && [[[AGProviderConfig activeProviderProfile] objectForKey:@"providerType"] isEqual:AGProviderTypeOpenAI]);
+  CHECK("http://host/v1 -> /v1/chat/completions (local servers)", [[[AGProviderConfig configuredChatCompletionURL] absoluteString] isEqual:@"http://192.168.1.5:1234/v1/chat/completions"]);
+  [AGProviderConfig updateProviderProfileWithIdentifier:oid values:[NSDictionary dictionaryWithObjectsAndKeys:@"x",@"providerName",@"https://h.example/v1/chat/completions",@"baseURL",@"m",@"c-aiModel",@"",@"apiKey",nil]];
+  CHECK("a full .../chat/completions URL is used as is", [[[AGProviderConfig configuredChatCompletionURL] absoluteString] isEqual:@"https://h.example/v1/chat/completions"]);
+  NSDictionary *f=[AGProviderConfig factoryValuesForType:AGProviderTypeOpenAI]; CHECK("OpenAI factory defaults", [[f objectForKey:@"baseURL"] isEqual:@"https://api.openai.com/v1"] && [[f objectForKey:@"c-aiModel"] length]>0);
+  [AGProviderConfig activateProviderProfileWithIdentifier:[[[AGProviderConfig providerProfilesOfType:AGProviderTypeGemini] objectAtIndex:0] objectForKey:@"identifier"]];
+  CHECK("switching back to a Gemini profile restores Gemini behaviour", ![AGProviderConfig isOpenAICompatibleActive] && [[[AGProviderConfig configuredChatCompletionURL] absoluteString] rangeOfString:@":generateContent"].location!=NSNotFound);
   printf("\n%s (%d failures)\n", fails?"SOME FAILED":"ALL PASSED", fails); return fails; }}

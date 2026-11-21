@@ -22,6 +22,7 @@ run shell    "$HERE/ShellGuardrailsTests.m"   $S/Agent/AGShellRunner.m $S/Agent/
 run text     "$HERE/TextUtilTests.m"          $S/Support/AGTextUtil.m
 run tools    "$HERE/AgentToolsTests.m"        $S/Support/AGTextUtil.m $S/Agent/AGAgentTools.m $S/Agent/AGShellRunner.m $S/Agent/AGGuardrails.m $S/Agent/AGPathJail.m
 run context  "$HERE/ContextBuilderTests.m"    $S/API/AGContextBuilder.m $S/Model/AGMessage.m
+run openai   "$HERE/OpenAIPayloadTests.m"     $S/API/AGContextBuilder.m $S/Agent/AGAgentTools.m $S/Agent/AGShellRunner.m $S/Agent/AGGuardrails.m $S/Agent/AGPathJail.m $S/Support/AGTextUtil.m $S/Model/AGMessage.m
 run config   "$HERE/ProviderConfigTests.m"    $S/API/AGProviderConfig.m $S/Model/AGMessage.m
 run store    "$HERE/ConversationStoreTests.m" $S/Storage/AGConversationStore.m $S/Model/AGMessage.m $S/Model/AGConversation.m \
              -include "$HERE/support/dispatch_shim.h" -include "$HERE/support/cf_shim.h"
@@ -42,12 +43,12 @@ loop() { mode=$1; shift
   Z=$(echo "$OUT" | grep -c "deallocated instance")
   if [ "$Z" -ne 0 ]; then echo "FAIL loop($mode): $Z messages sent to freed objects"; fail=1; fi
   [ $RC -eq 0 ] || fail=1; }
-echo "=== loop (real AGGeminiClient agent loop, fake server)"
+echo "=== loop (real AGChatClient agent loop, fake server)"
 OUT_DIR="$OUT"
 if $CC -I$HERE/support -I$S/Support -include "$HERE/support/dispatch_shim.h" -include "$HERE/support/cf_shim.h" "$HERE/AgentLoopTests.m" \
-   $S/API/AGGeminiClient.m $S/API/AGProviderConfig.m $S/API/AGContextBuilder.m $S/API/AGHTTPClient.m $S/Agent/AGAgentTools.m $S/Agent/AGShellRunner.m \
+   $S/API/AGChatClient.m $S/API/AGProviderConfig.m $S/API/AGContextBuilder.m $S/API/AGHTTPClient.m $S/Agent/AGAgentTools.m $S/Agent/AGShellRunner.m \
    $S/Agent/AGGuardrails.m $S/Agent/AGPathJail.m $S/Support/AGTextUtil.m $S/Storage/AGConversationStore.m $S/Model/AGMessage.m $S/Model/AGConversation.m \
    $LIBS -lcurl -o "$OUT/loop" 2>"$OUT/loop.log"; then
-  loop normal; loop same; loop steps
+  loop normal; loop same; loop steps; loop openai; loop openai-pure; loop openai-401
 else echo "BUILD FAILED"; cat "$OUT/loop.log"; fail=1; fi
 [ $fail -eq 0 ] && echo "ALL SUITES PASSED" || { echo "SOME SUITES FAILED"; exit 1; }

@@ -2,6 +2,10 @@
 
 @class AGMessage;
 
+/// Profile `providerType` values. Profiles saved by older versions have no type and are Gemini.
+extern NSString * const AGProviderTypeGemini;
+extern NSString * const AGProviderTypeOpenAI;
+
 /// Provider profiles (name / base URL / model / key), system prompt and request
 /// helpers. Foundation-only: rendering lives in AGMessageRenderer.
 @interface AGProviderConfig : NSObject
@@ -17,6 +21,12 @@
 + (NSString *)storedValueForKey:(NSString *)key fallback:(NSString *)fallback;
 
 + (NSArray *)providerProfiles;
++ (NSArray *)providerProfilesOfType:(NSString *)type;
++ (NSString *)providerTypeOfProfile:(NSDictionary *)profile;
++ (NSString *)activeProviderType;
++ (BOOL)isOpenAICompatibleActive;
+/// Suggested name / base URL / model for a new profile of `type`.
++ (NSDictionary *)factoryValuesForType:(NSString *)type;
 + (NSDictionary *)activeProviderProfile;
 + (NSString *)activeProviderProfileIdentifier;
 + (void)saveActiveProviderProfileWithValues:(NSDictionary *)values;

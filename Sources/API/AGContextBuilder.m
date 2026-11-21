@@ -303,4 +303,97 @@ static NSString *AGToolOutputForModel(AGMessage *m) {
 	return payload;
 }
 
+
+#pragma mark - OpenAI Chat Completions payload
+
++ (NSDictionary *)openAIPayloadForMessages:(NSArray *)messages
+                                 pureChat:(BOOL)pureChat
+                             systemPrompt:(NSString *)systemPrompt
+                                    tools:(NSArray *)openAITools
+                              tokenBudget:(NSUInteger)tokenBudget
+                                    model:(NSString *)model {
+
+	NSMutableArray *systemTexts = [NSMutableArray array];
+	if ([systemPrompt length] > 0) [systemTexts addObject:systemPrompt];
+	NSArray *clean = [self repairedMessages:messages pureChat:pureChat systemTexts:systemTexts];
+
+	NSString *systemJoined = [systemTexts componentsJoinedByString:@"\n\n"];
+	NSUInteger overhead = [self estimateTokensForText:systemJoined];
+	if (!pureChat && [openAITools count] > 0) {
+		NSData *toolJSON = [NSJSONSerialization dataWithJSONObject:openAITools options:0 error:nil];
+		overhead += [toolJSON length] / 4;
+	}
+	[self enforceBudget:tokenBudget overhead:overhead on:clean];
+
+	NSUInteger omittedCount = 0;
+	for (AGMessage *m in clean) if (m.omitted) omittedCount++;
+
+	NSMutableArray *out = [NSMutableArray array];
+	if ([systemJoined length] > 0) [out addObject:[NSDictionary dictionaryWithObjectsAndKeys:@"system", @"role", systemJoined, @"content", nil]];
+
+	NSMutableArray *pendingIDs = [NSMutableArray array]; // ids of the calls still waiting for their tool message
+	NSUInteger pendingIndex = 0;
+	BOOL noteInserted = NO;
+
+	for (AGMessage *m in clean) {
+		if (m.omitted) continue;
+
+		if ([m.role isEqualToString:@"tool"]) {
+			if (pendingIndex >= [pendingIDs count]) continue; // cannot happen after repair; never emit an unmatched tool message
+			NSString *content = AGToolOutputForModel(m);
+			if ([content length] == 0) content = @"(empty)";
+			[out addObject:[NSDictionary dictionaryWithObjectsAndKeys:@"tool", @"role", [pendingIDs objectAtIndex:pendingIndex], @"tool_call_id", content, @"content", nil]];
+			pendingIndex++;
+			continue;
+		}
+		[pendingIDs removeAllObjects];
+		pendingIndex = 0;
+
+		NSString *text = AGVisibleText(m);
+		if (![m.role isEqualToString:@"assistant"]) {
+			if (!noteInserted && omittedCount > 0) {
+				text = [text stringByAppendingFormat:@"\n\n[Note: %lu earlier messages were left out of this context to save tokens. Re-read files or re-run commands if you need earlier details.]", (unsigned long)omittedCount];
+				noteInserted = YES;
+			}
+			if ([text length] == 0) continue;
+			[out addObject:[NSDictionary dictionaryWithObjectsAndKeys:@"user", @"role", text, @"content", nil]];
+			continue;
+		}
+
+		NSMutableArray *calls = [NSMutableArray array];
+		if (!pureChat) {
+			for (NSDictionary *call in m.toolCalls) {
+				NSDictionary *fn = AGFunctionOf(call);
+				NSString *name = [fn objectForKey:@"name"];
+				if (![name isKindOfClass:[NSString class]] || [name length] == 0) continue;
+
+				NSString *arguments = [fn objectForKey:@"arguments"];
+				if (m.compacted || ![arguments isKindOfClass:[NSString class]]) {
+					NSDictionary *args = AGParsedArgs(fn);
+					if (m.compacted) args = AGShrunkArgs(args);
+					NSData *json = [NSJSONSerialization dataWithJSONObject:args options:0 error:nil];
+					arguments = json ? [[[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding] autorelease] : @"{}";
+				} else if ([NSJSONSerialization JSONObjectWithData:[arguments dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil] == nil) {
+					arguments = @"{}"; // servers validate this string; never send invalid JSON
+				}
+				NSString *callID = [call objectForKey:@"id"];
+				if (![callID isKindOfClass:[NSString class]] || [callID length] == 0) {
+					callID = [NSString stringWithFormat:@"call_%08lx", (unsigned long)([[name stringByAppendingString:arguments] hash] + [calls count])];
+				}
+				[calls addObject:[NSDictionary dictionaryWithObjectsAndKeys:callID, @"id", @"function", @"type",
+					[NSDictionary dictionaryWithObjectsAndKeys:name, @"name", arguments, @"arguments", nil], @"function", nil]];
+				[pendingIDs addObject:callID];
+			}
+		}
+		if ([text length] == 0 && [calls count] == 0) continue;
+		NSMutableDictionary *assistant = [NSMutableDictionary dictionaryWithObjectsAndKeys:@"assistant", @"role", text, @"content", nil];
+		if ([calls count] > 0) [assistant setObject:calls forKey:@"tool_calls"];
+		[out addObject:assistant];
+	}
+
+	NSMutableDictionary *payload = [NSMutableDictionary dictionaryWithObjectsAndKeys:(model ?: @""), @"model", out, @"messages", nil];
+	if (!pureChat && [openAITools count] > 0) [payload setObject:openAITools forKey:@"tools"];
+	return payload;
+}
+
 @end

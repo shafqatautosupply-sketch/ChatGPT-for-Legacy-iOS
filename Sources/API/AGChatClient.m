@@ -1,4 +1,4 @@
-#import "AGGeminiClient.h"
+#import "AGChatClient.h"
 #import "AGProviderConfig.h"
 #import "AGMessage.h"
 #import "AGGuardrails.h"
@@ -30,7 +30,7 @@ static NSString * const AGLastUsageKey = @"ag_last_usage";
 /// same chat.)
 static volatile NSUInteger g_currentRun = 0;
 
-@implementation AGGeminiClient
+@implementation AGChatClient
 
 #pragma mark - Modes
 
@@ -244,6 +244,82 @@ static volatile NSUInteger g_currentRun = 0;
 	return message;
 }
 
+#pragma mark - OpenAI-compatible responses
+
++ (void)recordOpenAIUsage:(NSDictionary *)usage {
+	if (![usage isKindOfClass:[NSDictionary class]]) return;
+	id cached = [[usage objectForKey:@"prompt_tokens_details"] objectForKey:@"cached_tokens"];   // OpenAI
+	if (![cached isKindOfClass:[NSNumber class]]) cached = [usage objectForKey:@"prompt_cache_hit_tokens"]; // DeepSeek
+	id reasoning = [[usage objectForKey:@"completion_tokens_details"] objectForKey:@"reasoning_tokens"];
+	NSDictionary *summary = [NSDictionary dictionaryWithObjectsAndKeys:
+		[usage objectForKey:@"prompt_tokens"] ?: [NSNumber numberWithInt:0], @"prompt",
+		([cached isKindOfClass:[NSNumber class]] ? cached : [NSNumber numberWithInt:0]), @"cached",
+		[usage objectForKey:@"completion_tokens"] ?: [NSNumber numberWithInt:0], @"output",
+		([reasoning isKindOfClass:[NSNumber class]] ? reasoning : [NSNumber numberWithInt:0]), @"thoughts", nil];
+	[[NSUserDefaults standardUserDefaults] setObject:summary forKey:AGLastUsageKey];
+}
+
+/// Assistant message from a Chat Completions response (choices[0].message). Tool calls are stored
+/// in the same internal shape as Gemini ones, so history, UI and the token saver need no changes.
++ (AGMessage *)assistantMessageFromOpenAIResponse:(NSDictionary *)parsed notice:(NSString **)notice {
+	NSArray *choices = [parsed objectForKey:@"choices"];
+	if (![choices isKindOfClass:[NSArray class]] || [choices count] == 0 || ![[choices objectAtIndex:0] isKindOfClass:[NSDictionary class]]) {
+		NSDictionary *errorObject = [parsed objectForKey:@"error"]; // some servers answer 200 with an error body
+		NSString *detail = [errorObject isKindOfClass:[NSDictionary class]] ? [errorObject objectForKey:@"message"] : nil;
+		if (notice) *notice = ([detail isKindOfClass:[NSString class]] && [detail length] > 0) ? detail : @"The model returned no choices.";
+		return nil;
+	}
+	NSDictionary *choice = [choices objectAtIndex:0];
+	NSDictionary *message = [choice objectForKey:@"message"];
+	if (![message isKindOfClass:[NSDictionary class]]) message = [NSDictionary dictionary];
+
+	NSMutableString *text = [NSMutableString string];
+	id content = [message objectForKey:@"content"];
+	if ([content isKindOfClass:[NSString class]]) {
+		[text appendString:content];
+	} else if ([content isKindOfClass:[NSArray class]]) { // content parts
+		for (id part in content) {
+			NSString *piece = [part isKindOfClass:[NSDictionary class]] ? [part objectForKey:@"text"] : nil;
+			if ([piece isKindOfClass:[NSString class]]) [text appendString:piece];
+		}
+	}
+
+	NSMutableArray *toolCalls = [NSMutableArray array];
+	id rawCalls = [message objectForKey:@"tool_calls"];
+	if ([rawCalls isKindOfClass:[NSArray class]]) {
+		for (id raw in rawCalls) {
+			if (![raw isKindOfClass:[NSDictionary class]]) continue;
+			NSDictionary *fn = [raw objectForKey:@"function"];
+			if (![fn isKindOfClass:[NSDictionary class]]) continue;
+			NSString *name = [fn objectForKey:@"name"];
+			if (![name isKindOfClass:[NSString class]] || [name length] == 0) continue;
+
+			id arguments = [fn objectForKey:@"arguments"];
+			NSString *argsString = @"{}";
+			if ([arguments isKindOfClass:[NSString class]]) {
+				id check = [NSJSONSerialization JSONObjectWithData:[(NSString *)arguments dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+				if ([check isKindOfClass:[NSDictionary class]]) argsString = arguments;
+			} else if ([arguments isKindOfClass:[NSDictionary class]]) { // a few servers send an object
+				NSData *json = [NSJSONSerialization dataWithJSONObject:arguments options:0 error:nil];
+				if (json != nil) argsString = [[[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding] autorelease];
+			}
+			NSString *callID = [raw objectForKey:@"id"];
+			if (![callID isKindOfClass:[NSString class]] || [callID length] == 0) callID = [NSString stringWithFormat:@"call_%08x", arc4random()];
+			[toolCalls addObject:[NSDictionary dictionaryWithObjectsAndKeys:callID, @"id", @"function", @"type",
+				[NSDictionary dictionaryWithObjectsAndKeys:name, @"name", argsString, @"arguments", nil], @"function", nil]];
+		}
+	}
+
+	if ([text length] == 0 && [toolCalls count] == 0) {
+		NSString *reason = [choice objectForKey:@"finish_reason"];
+		if (notice) *notice = [NSString stringWithFormat:@"The model returned no content%@.", ([reason isKindOfClass:[NSString class]] && [reason length] > 0) ? [NSString stringWithFormat:@" (finish reason: %@)", reason] : @""];
+		return nil;
+	}
+	AGMessage *assistant = [AGProviderConfig assistantMessageWithText:text];
+	assistant.toolCalls = toolCalls;
+	return assistant;
+}
+
 #pragma mark - The agent loop
 
 + (void)createChatCompletionWithMessages:(NSArray *)messages {
@@ -278,18 +354,29 @@ static volatile NSUInteger g_currentRun = 0;
 
 				NSString *apiKey = [AGProviderConfig currentAPIKey];
 				if ([apiKey length] == 0) {
-					[self postNotice:@"API key is missing. Add one under Settings > Provider Profiles." forRun:run];
+					[self postNotice:@"API key is missing. Add one under Settings > Model Configurations." forRun:run];
 					[self postStatus:NO forRun:run];
 					return;
 				}
 
-				NSArray *tools = isPureChat ? nil : [AGAgentTools toolDeclarations];
-				NSDictionary *payload = [AGContextBuilder payloadForMessages:history
-					pureChat:isPureChat
-					systemPrompt:[AGProviderConfig configuredSystemPrompt]
-					toolDeclarations:tools
-					tokenBudget:[AGConversationStore contextTokenBudget]
-					generationConfig:isPureChat ? nil : [AGProviderConfig generationConfigForCurrentModel]];
+				// One request = one provider format; decided once here so URL, body and parsing agree.
+				BOOL openAI = [AGProviderConfig isOpenAICompatibleActive];
+				NSDictionary *payload = nil;
+				if (openAI) {
+					payload = [AGContextBuilder openAIPayloadForMessages:history
+						pureChat:isPureChat
+						systemPrompt:[AGProviderConfig configuredSystemPrompt]
+						tools:(isPureChat ? nil : [AGAgentTools openAIToolDeclarations])
+						tokenBudget:[AGConversationStore contextTokenBudget]
+						model:[AGProviderConfig configuredChatModel]];
+				} else {
+					payload = [AGContextBuilder payloadForMessages:history
+						pureChat:isPureChat
+						systemPrompt:[AGProviderConfig configuredSystemPrompt]
+						toolDeclarations:(isPureChat ? nil : [AGAgentTools toolDeclarations])
+						tokenBudget:[AGConversationStore contextTokenBudget]
+						generationConfig:isPureChat ? nil : [AGProviderConfig generationConfigForCurrentModel]];
+				}
 				NSData *body = [NSJSONSerialization dataWithJSONObject:payload options:0 error:nil];
 				if (body == nil) {
 					[self postNotice:@"Failed to encode the request." forRun:run];
@@ -320,18 +407,22 @@ static volatile NSUInteger g_currentRun = 0;
 					[self postStatus:NO forRun:run];
 					return;
 				}
-				[self recordUsage:[parsed objectForKey:@"usageMetadata"]];
-
-				NSArray *candidates = [parsed objectForKey:@"candidates"];
-				if (![candidates isKindOfClass:[NSArray class]] || [candidates count] == 0) {
-					NSString *block = [[parsed objectForKey:@"promptFeedback"] objectForKey:@"blockReason"];
-					[self postNotice:[block length] > 0 ? [NSString stringWithFormat:@"The request was blocked (%@).", block] : @"The model returned no candidates." forRun:run];
-					[self postStatus:NO forRun:run];
-					return;
-				}
-
+				AGMessage *assistant = nil;
 				NSString *notice = nil;
-				AGMessage *assistant = [self assistantMessageFromCandidate:[candidates objectAtIndex:0] notice:&notice];
+				if (openAI) {
+					[self recordOpenAIUsage:[parsed objectForKey:@"usage"]];
+					assistant = [self assistantMessageFromOpenAIResponse:parsed notice:&notice];
+				} else {
+					[self recordUsage:[parsed objectForKey:@"usageMetadata"]];
+					NSArray *candidates = [parsed objectForKey:@"candidates"];
+					if (![candidates isKindOfClass:[NSArray class]] || [candidates count] == 0) {
+						NSString *block = [[parsed objectForKey:@"promptFeedback"] objectForKey:@"blockReason"];
+						[self postNotice:[block length] > 0 ? [NSString stringWithFormat:@"The request was blocked (%@).", block] : @"The model returned no candidates." forRun:run];
+						[self postStatus:NO forRun:run];
+						return;
+					}
+					assistant = [self assistantMessageFromCandidate:[candidates objectAtIndex:0] notice:&notice];
+				}
 				if (assistant == nil) {
 					[self postNotice:notice forRun:run];
 					[self postStatus:NO forRun:run];

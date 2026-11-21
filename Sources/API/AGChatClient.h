@@ -14,7 +14,7 @@ extern NSString * const AGMarkdownModeChangedNotification;
 /// write into the wrong chat.
 extern NSString * const AGAPIRunUserInfoKey;
 
-@interface AGGeminiClient : NSObject
+@interface AGChatClient : NSObject
 
 /// Starts a run: one model request, then (agent mode) tool calls and follow-up
 /// requests until the model answers in text. Any older run is cancelled.

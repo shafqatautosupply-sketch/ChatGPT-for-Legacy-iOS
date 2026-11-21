@@ -49,7 +49,11 @@ The guardrails are the only barrier.
   process running as `mobile` can read it.
 - The conversation (including file contents and command output the model touched) is sent
   to Google.
-- Plain `http://` base URLs send the key unencrypted.
+- Plain `http://` base URLs send the key unencrypted (OK on a trusted LAN for a local model server, not otherwise).
+- The bundled CA list is Mozilla's, without a few older roots (Baltimore CyberTrust, DigiCert Global Root CA). A provider
+  whose chain ends there fails verification until you point `ag_ca_bundle_path` at a fuller bundle or enable the
+  explicit insecure switch.
+- With an OpenAI-compatible provider your conversation, file contents and command output go to *that* provider.
 
 ## Ideas for the next hardening step
 

@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.2.0
+- **OpenAI-compatible endpoints** next to Google Gemini. *Settings > Model Configurations* now has two sections,
+  "Google Gemini" (as before) and "OpenAI Compatible" (OpenAI, OpenRouter, DeepSeek, Groq, LM Studio, Ollama...),
+  each with its own "Add..." row. Chat, Agent mode, the four tools, Token Saver, history, retry/backoff, step limit
+  and the loop guard are shared; only the request/response format differs:
+  `POST {base URL}/chat/completions`, `Authorization: Bearer <key>`, `tool_calls` / `tool` messages with matching
+  `tool_call_id`s. The base URL may be `https://host/v1`, `https://host`, or a full `.../chat/completions`.
+- Profiles saved by older versions have no type and stay Gemini; nothing to migrate.
+- Chats can be continued after switching provider (call ids are matched by position). Caveat: continuing a chat
+  that already used tools on an OpenAI-compatible model with a Gemini 3 model may be refused by Gemini, which wants
+  its own thought signatures on earlier calls. Start a new chat in that case.
+- Token usage row works for both (OpenAI `usage`, including cached tokens where the server reports them).
+- Renamed `AGGeminiClient` to `AGChatClient` (it now speaks both APIs).
+- Tests: strict fake OpenAI server (rejects bad auth, upper-case schema types, unmatched `tool_call_id`s with HTTP 400),
+  OpenAI payload structure tests, loop tests for tool calls, pure chat and error bodies, all under zombie detection.
+
 ## 1.1.3
 - **Pre-Execution Commands now expand `$NAME` and `${NAME}`** (not in single quotes), as a shell would.
   Since 1.1.0 commands run without a shell, so `export PATH=$PATH:/var/mobile/theos/bin` set PATH to the

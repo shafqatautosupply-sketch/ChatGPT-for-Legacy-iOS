@@ -7,7 +7,7 @@
 #import "AGChatLimitsViewController.h"
 #import "AGConversationStore.h"
 #import "AGProviderConfig.h"
-#import "AGGeminiClient.h"
+#import "AGChatClient.h"
 
 @implementation AGSettingsViewController
 
@@ -73,7 +73,7 @@
 			UISwitch *agentSwitch = (UISwitch *)cell.accessoryView;
 			[agentSwitch removeTarget:nil action:NULL forControlEvents:UIControlEventValueChanged];
 			[agentSwitch addTarget:self action:@selector(agentSwitchChanged:) forControlEvents:UIControlEventValueChanged];
-			agentSwitch.on = [AGGeminiClient isAgentModeEnabled];
+			agentSwitch.on = [AGChatClient isAgentModeEnabled];
 			return cell;
 		} else if (indexPath.row == 1) {
 			static NSString *TerminalCellID = @"TerminalSwitchCell";
@@ -88,7 +88,7 @@
 			UISwitch *terminalSwitch = (UISwitch *)cell.accessoryView;
 			[terminalSwitch removeTarget:nil action:NULL forControlEvents:UIControlEventValueChanged];
 			[terminalSwitch addTarget:self action:@selector(terminalSwitchChanged:) forControlEvents:UIControlEventValueChanged];
-			terminalSwitch.on = [AGGeminiClient isTerminalModeEnabled];
+			terminalSwitch.on = [AGChatClient isTerminalModeEnabled];
 			return cell;
 		} else {
 			static NSString *MarkdownCellID = @"MarkdownSwitchCell";
@@ -103,7 +103,7 @@
 			UISwitch *markdownSwitch = (UISwitch *)cell.accessoryView;
 			[markdownSwitch removeTarget:nil action:NULL forControlEvents:UIControlEventValueChanged];
 			[markdownSwitch addTarget:self action:@selector(markdownSwitchChanged:) forControlEvents:UIControlEventValueChanged];
-			markdownSwitch.on = [AGGeminiClient isMarkdownEnabled];
+			markdownSwitch.on = [AGChatClient isMarkdownEnabled];
 			return cell;
 		}
 	}
@@ -147,7 +147,7 @@
 		} else if (indexPath.row == 3) {
 			cell.accessoryType = UITableViewCellAccessoryNone;
 			cell.selectionStyle = UITableViewCellSelectionStyleNone;
-			NSDictionary *usage = [AGGeminiClient lastUsage];
+			NSDictionary *usage = [AGChatClient lastUsage];
 			if (usage == nil) {
 				cell.textLabel.text = @"Last request: no data yet";
 			} else {
@@ -168,15 +168,15 @@
 }
 
 - (void)agentSwitchChanged:(UISwitch *)sender {
-	[AGGeminiClient setAgentModeEnabled:sender.isOn];
+	[AGChatClient setAgentModeEnabled:sender.isOn];
 }
 
 - (void)terminalSwitchChanged:(UISwitch *)sender {
-	[AGGeminiClient setTerminalModeEnabled:sender.isOn];
+	[AGChatClient setTerminalModeEnabled:sender.isOn];
 }
 
 - (void)markdownSwitchChanged:(UISwitch *)sender {
-	[AGGeminiClient setMarkdownEnabled:sender.isOn];
+	[AGChatClient setMarkdownEnabled:sender.isOn];
 }
 
 - (void)compressionSwitchChanged:(UISwitch *)sender {

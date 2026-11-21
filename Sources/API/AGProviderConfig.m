@@ -1,6 +1,10 @@
 #import "AGProviderConfig.h"
 #import "AGMessage.h"
 
+NSString * const AGProviderTypeGemini = @"gemini";
+NSString * const AGProviderTypeOpenAI = @"openai";
+static NSString * const AGDefaultOpenAIBaseURL = @"https://api.openai.com/v1";
+static NSString * const AGDefaultOpenAIModel = @"gpt-4o-mini";
 static NSString * const AGProviderProfilesKey = @"providerProfiles";
 static NSString * const AGActiveProviderProfileIDKey = @"activeProviderProfileID";
 static NSString * const AGLegacyActiveProfileIDKey = @"agent_activeProviderProfileID";
@@ -33,12 +37,26 @@ static NSString * const AGDefaultModel = @"gemini-2.5-flash";
 /// used to be re-derived from "name|baseURL", so two profiles with the same
 /// name and URL (typical: two keys or two models on Gemini) collided, and
 /// renaming the active profile orphaned it.
++ (NSString *)normalizedType:(id)type {
+	return ([type isKindOfClass:[NSString class]] && [[type lowercaseString] isEqualToString:AGProviderTypeOpenAI]) ? AGProviderTypeOpenAI : AGProviderTypeGemini;
+}
+
++ (NSDictionary *)factoryValuesForType:(NSString *)type {
+	if ([[self normalizedType:type] isEqualToString:AGProviderTypeOpenAI]) {
+		return [NSDictionary dictionaryWithObjectsAndKeys:@"OpenAI Compatible", @"providerName", AGDefaultOpenAIBaseURL, @"baseURL", AGDefaultOpenAIModel, @"c-aiModel", @"", @"apiKey", AGProviderTypeOpenAI, @"providerType", nil];
+	}
+	return [NSDictionary dictionaryWithObjectsAndKeys:@"Google Gemini", @"providerName", AGDefaultBaseURL, @"baseURL", AGDefaultModel, @"c-aiModel", @"", @"apiKey", AGProviderTypeGemini, @"providerType", nil];
+}
+
 + (NSDictionary *)profileDictionaryFromValues:(NSDictionary *)values identifier:(NSString *)identifier {
+	NSString *type = [self normalizedType:[values objectForKey:@"providerType"]];
+	NSDictionary *defaults = [self factoryValuesForType:type];
 	return [NSDictionary dictionaryWithObjectsAndKeys:
 		identifier, @"identifier",
-		[self trimmedString:[values objectForKey:@"providerName"] fallback:@"Google Gemini"], @"providerName",
-		[self trimmedString:[values objectForKey:@"baseURL"] fallback:AGDefaultBaseURL], @"baseURL",
-		[self trimmedString:[values objectForKey:@"c-aiModel"] fallback:AGDefaultModel], @"c-aiModel",
+		type, @"providerType",
+		[self trimmedString:[values objectForKey:@"providerName"] fallback:[defaults objectForKey:@"providerName"]], @"providerName",
+		[self trimmedString:[values objectForKey:@"baseURL"] fallback:[defaults objectForKey:@"baseURL"]], @"baseURL",
+		[self trimmedString:[values objectForKey:@"c-aiModel"] fallback:[defaults objectForKey:@"c-aiModel"]], @"c-aiModel",
 		[self trimmedString:[values objectForKey:@"apiKey"] fallback:@""], @"apiKey",
 		nil];
 }
@@ -47,9 +65,7 @@ static NSString * const AGDefaultModel = @"gemini-2.5-flash";
 	return [NSString stringWithFormat:@"profile-%08x%08x", arc4random(), arc4random()];
 }
 
-+ (NSDictionary *)factoryValues {
-	return [NSDictionary dictionaryWithObjectsAndKeys:@"Google Gemini", @"providerName", AGDefaultBaseURL, @"baseURL", AGDefaultModel, @"c-aiModel", @"", @"apiKey", nil];
-}
++ (NSDictionary *)factoryValues { return [self factoryValuesForType:AGProviderTypeGemini]; }
 
 + (void)registerProviderDefaults {
 	NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
@@ -92,6 +108,22 @@ static NSString * const AGDefaultModel = @"gemini-2.5-flash";
 	NSArray *profiles = [[NSUserDefaults standardUserDefaults] objectForKey:AGProviderProfilesKey];
 	return [profiles isKindOfClass:[NSArray class]] ? profiles : [NSArray array];
 }
+
++ (NSString *)providerTypeOfProfile:(NSDictionary *)profile {
+	return [self normalizedType:[profile objectForKey:@"providerType"]];
+}
+
++ (NSArray *)providerProfilesOfType:(NSString *)type {
+	NSString *wanted = [self normalizedType:type];
+	NSMutableArray *result = [NSMutableArray array];
+	for (NSDictionary *profile in [self providerProfiles]) {
+		if ([[self providerTypeOfProfile:profile] isEqualToString:wanted]) [result addObject:profile];
+	}
+	return result;
+}
+
++ (NSString *)activeProviderType { return [self providerTypeOfProfile:[self activeProviderProfile]]; }
++ (BOOL)isOpenAICompatibleActive { return [[self activeProviderType] isEqualToString:AGProviderTypeOpenAI]; }
 
 + (NSString *)activeProviderProfileIdentifier {
 	NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
@@ -140,15 +172,18 @@ static NSString * const AGDefaultModel = @"gemini-2.5-flash";
 + (void)updateProviderProfileWithIdentifier:(NSString *)identifier values:(NSDictionary *)values createIfMissing:(BOOL)create {
 	if ([identifier length] == 0) return;
 	NSMutableArray *profiles = [NSMutableArray arrayWithArray:[self providerProfiles]];
-	NSDictionary *updated = [self profileDictionaryFromValues:values identifier:identifier]; // identifier unchanged
 	for (NSUInteger i = 0; i < [profiles count]; i++) {
 		if ([[[profiles objectAtIndex:i] objectForKey:@"identifier"] isEqualToString:identifier]) {
+			NSMutableDictionary *merged = [NSMutableDictionary dictionaryWithDictionary:values];
+			if ([merged objectForKey:@"providerType"] == nil) [merged setObject:[self providerTypeOfProfile:[profiles objectAtIndex:i]] forKey:@"providerType"]; // keep the type
+			NSDictionary *updated = [self profileDictionaryFromValues:merged identifier:identifier]; // identifier unchanged
 			[profiles replaceObjectAtIndex:i withObject:updated];
 			[self persistProfiles:profiles activeIdentifier:[self activeProviderProfileIdentifier]];
 			return;
 		}
 	}
 	if (create) {
+		NSDictionary *updated = [self profileDictionaryFromValues:values identifier:identifier];
 		[profiles addObject:updated];
 		[self persistProfiles:profiles activeIdentifier:identifier];
 	}
@@ -173,7 +208,7 @@ static NSString * const AGDefaultModel = @"gemini-2.5-flash";
 
 #pragma mark - Values
 
-+ (NSString *)providerDisplayName { return [self trimmedString:[[self activeProviderProfile] objectForKey:@"providerName"] fallback:@"Google Gemini"]; }
++ (NSString *)providerDisplayName { return [self trimmedString:[[self activeProviderProfile] objectForKey:@"providerName"] fallback:[[self factoryValuesForType:[self activeProviderType]] objectForKey:@"providerName"]]; }
 + (NSString *)storedValueForKey:(NSString *)key fallback:(NSString *)fallback { return [self trimmedString:[[self activeProviderProfile] objectForKey:key] fallback:fallback]; }
 
 + (NSString *)currentAPIKey {
@@ -182,12 +217,12 @@ static NSString * const AGDefaultModel = @"gemini-2.5-flash";
 }
 
 + (NSString *)configuredBaseURL {
-	NSString *base = [self trimmedString:[[self activeProviderProfile] objectForKey:@"baseURL"] fallback:AGDefaultBaseURL];
+	NSString *base = [self trimmedString:[[self activeProviderProfile] objectForKey:@"baseURL"] fallback:[[self factoryValuesForType:[self activeProviderType]] objectForKey:@"baseURL"]];
 	while ([base hasSuffix:@"/"]) base = [base substringToIndex:[base length] - 1];
 	return base;
 }
 
-+ (NSString *)configuredChatModel { return [self trimmedString:[[self activeProviderProfile] objectForKey:@"c-aiModel"] fallback:AGDefaultModel]; }
++ (NSString *)configuredChatModel { return [self trimmedString:[[self activeProviderProfile] objectForKey:@"c-aiModel"] fallback:[[self factoryValuesForType:[self activeProviderType]] objectForKey:@"c-aiModel"]]; }
 
 + (NSString *)configuredSystemPrompt {
 	return [self trimmedString:[[NSUserDefaults standardUserDefaults] objectForKey:AGSystemPromptKey] fallback:@""];
@@ -200,17 +235,26 @@ static NSString * const AGDefaultModel = @"gemini-2.5-flash";
 }
 
 + (NSURL *)configuredChatCompletionURL {
+	NSString *base = [self configuredBaseURL];
+	if ([self isOpenAICompatibleActive]) {
+		// Accept "https://host/v1", "https://host" and a full ".../chat/completions".
+		if ([base hasSuffix:@"/chat/completions"]) return [NSURL URLWithString:base];
+		return [NSURL URLWithString:[base stringByAppendingString:@"/chat/completions"]];
+	}
 	NSString *model = [self configuredChatModel];
 	NSString *escapedModel = [model stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding] ?: model;
-	return [NSURL URLWithString:[NSString stringWithFormat:@"%@/v1beta/models/%@:generateContent", [self configuredBaseURL], escapedModel]];
+	return [NSURL URLWithString:[NSString stringWithFormat:@"%@/v1beta/models/%@:generateContent", base, escapedModel]];
 }
 
 + (void)applyAuthorizationHeadersToRequest:(NSMutableURLRequest *)request withAPIKey:(NSString *)key {
 	[request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
-	if ([key length] > 0) [request setValue:key forHTTPHeaderField:@"x-goog-api-key"];
+	if ([key length] == 0) return;
+	if ([self isOpenAICompatibleActive]) [request setValue:[@"Bearer " stringByAppendingString:key] forHTTPHeaderField:@"Authorization"];
+	else [request setValue:key forHTTPHeaderField:@"x-goog-api-key"];
 }
 
 + (NSDictionary *)generationConfigForCurrentModel {
+	if ([self isOpenAICompatibleActive]) return nil; // thinking options are Gemini-specific
 	NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
 	NSString *level = [defaults stringForKey:@"ag_thinking_level"];
 	id budget = [defaults objectForKey:@"ag_thinking_budget"];

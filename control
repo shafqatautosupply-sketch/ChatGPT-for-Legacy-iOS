@@ -1,6 +1,6 @@
 Package: com.creative.agentic
 Name: Agentic
-Version: 1.1.3
+Version: 1.2.0
 Architecture: iphoneos-arm
 Description: Autonomous AI Agent & chat workspace with local tool execution for iOS 6.
 Maintainer: creative

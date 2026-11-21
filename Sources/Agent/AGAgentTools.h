@@ -6,6 +6,9 @@
 
 /// Gemini `functionDeclarations` payload (kept short: it is sent with every request).
 + (NSArray *)toolDeclarations;
+/// The same tools in OpenAI Chat Completions format: [{"type":"function","function":{name,description,parameters}}].
+/// Derived from toolDeclarations so the two formats cannot drift apart.
++ (NSArray *)openAIToolDeclarations;
 
 /// Runs one tool call. `arguments` comes straight from the model and may have
 /// any shape; bad input yields an error string, never an exception.

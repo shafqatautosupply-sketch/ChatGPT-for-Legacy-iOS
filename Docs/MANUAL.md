@@ -3,13 +3,22 @@
 Agentic is an AI chat client and coding agent for jailbroken iOS 6 devices. It uses Google Gemini.
 
 ## 1. First start
-1. **Settings > Model Configurations**: add your Gemini API key (free from Google AI Studio). Several
-   profiles can exist; tap one to make it active. Editing a profile keeps it active.
+1. **Settings > Model Configurations** has two sections:
+   - **Google Gemini**: your Gemini API key (free from Google AI Studio).
+   - **OpenAI Compatible**: any server that speaks the OpenAI Chat Completions API. Tap *Add OpenAI Compatible...*,
+     then fill in Base URL (for example `https://api.openai.com/v1`, `https://openrouter.ai/api/v1`,
+     `https://api.deepseek.com`, or a local server such as `http://192.168.1.5:1234/v1`), the model name and the key
+     (local servers often accept any text; leave nothing empty if the app complains about a missing key).
+   Several configurations can exist in each section; tap one to make it active (the check mark can be in either
+   section). Tap the (i) button to edit, swipe to delete. Editing a configuration keeps it active.
+   **Agent Mode needs a model that supports tool calling.** If a model does not, you get an HTTP 400 notice; use
+   Pure chat or pick another model.
 2. Type a message at the bottom and tap **Send**. While a reply is pending the button says **Stop**.
 3. **Chats** lists saved conversations; **New Chat** starts a fresh one. Switching chat stops any running agent.
 
 The key is saved in the app's preferences on the device (not the keychain) and is sent only to the
-configured API host, over HTTPS with certificate verification.
+configured API host (as `x-goog-api-key` for Gemini, as a Bearer token for OpenAI-compatible servers), over HTTPS
+with certificate verification. `http://` URLs (fine for a server on your own network) send it unencrypted.
 
 ## 2. Modes (Settings > Mode)
 - **Agent Mode**: the model can use tools in your workspace folder: run commands, read, write and edit files.
@@ -53,7 +62,9 @@ tokens the API reported for the previous call (input, cached, output).
   `ag_thinking_budget` (Gemini 2.5: number of thinking tokens) to limit reasoning cost.
 
 ## 6. Troubleshooting
-- **"certificate could not be verified"**: check the device date and time first. Then see `SECURITY.md`.
+- **"certificate could not be verified"**: check the device date and time first. The bundled CA list does not contain
+  a few older roots (e.g. Baltimore CyberTrust, DigiCert Global Root CA), so some hosts can fail even with a correct
+  clock; see `SECURITY.md` for the options (custom CA file, or the explicit insecure switch).
 - **HTTP 429**: free-tier rate limit. Requests are retried automatically a few times; raise the
   interval between requests if it keeps happening.
 - **"Stopped after N steps"**: send a message to let it continue, or raise *Max agent steps*.

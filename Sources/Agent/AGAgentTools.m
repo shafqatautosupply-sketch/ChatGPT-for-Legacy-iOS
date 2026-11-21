@@ -59,6 +59,39 @@ static NSDictionary *AGTool(NSString *name, NSString *description, NSDictionary 
 	return [NSArray arrayWithObject:[NSDictionary dictionaryWithObject:declarations forKey:@"functionDeclarations"]];
 }
 
+/// JSON-Schema types are uppercase in Gemini ("OBJECT") and lowercase in OpenAI ("object").
+static id AGLowercasedSchema(id node) {
+	if ([node isKindOfClass:[NSDictionary class]]) {
+		NSMutableDictionary *out = [NSMutableDictionary dictionary];
+		for (NSString *key in node) {
+			id value = [node objectForKey:key];
+			if ([key isEqualToString:@"type"] && [value isKindOfClass:[NSString class]]) [out setObject:[value lowercaseString] forKey:key];
+			else [out setObject:AGLowercasedSchema(value) forKey:key];
+		}
+		return out;
+	}
+	if ([node isKindOfClass:[NSArray class]]) {
+		NSMutableArray *out = [NSMutableArray array];
+		for (id item in node) [out addObject:AGLowercasedSchema(item)];
+		return out;
+	}
+	return node;
+}
+
++ (NSArray *)openAIToolDeclarations {
+	NSMutableArray *tools = [NSMutableArray array];
+	for (NSDictionary *group in [self toolDeclarations]) {
+		for (NSDictionary *declaration in [group objectForKey:@"functionDeclarations"]) {
+			NSDictionary *function = [NSDictionary dictionaryWithObjectsAndKeys:
+				[declaration objectForKey:@"name"], @"name",
+				[declaration objectForKey:@"description"], @"description",
+				AGLowercasedSchema([declaration objectForKey:@"parameters"]), @"parameters", nil];
+			[tools addObject:[NSDictionary dictionaryWithObjectsAndKeys:@"function", @"type", function, @"function", nil]];
+		}
+	}
+	return tools;
+}
+
 #pragma mark - Output clipping
 
 + (NSUInteger)toolOutputLimit {

@@ -1,7 +1,7 @@
 # Agentic
 
 An AI chat client and **coding agent** for jailbroken iOS 6 devices (iPhone 4S primary target).
-It talks to Google Gemini and lets the model read, write and edit files and run build tools
+It talks to Google Gemini or to any OpenAI-compatible endpoint (OpenAI, OpenRouter, DeepSeek, Groq, LM Studio, Ollama, ...) and lets the model read, write and edit files and run build tools
 (`make`, `clang`, `ldid`, `dpkg-deb`, ...) inside a sandboxed workspace, so you can develop
 Theos projects from the phone itself.
 
@@ -23,7 +23,7 @@ existing chats and settings are kept when you upgrade.
 | Path | What lives there |
 |---|---|
 | `Sources/App` | `main.m`, app delegate |
-| `Sources/API` | Gemini client and agent loop, request/context builder, provider profiles, HTTPS client (libcurl) |
+| `Sources/API` | Chat client and agent loop (Gemini and OpenAI-compatible), request/context builder, provider profiles, HTTPS client (libcurl) |
 | `Sources/Agent` | Tools the model can call, shell runner, guardrails, path jail |
 | `Sources/Model` | `AGMessage`, `AGConversation` (Foundation only) |
 | `Sources/Storage` | Chat history on disk |
@@ -42,7 +42,7 @@ All classes use one prefix, `AG`.
 - **Agent mode**: tools `runShellCommand`, `readFile`, `writeFile`, `editFile`.
 - **Pure chat mode**: plain conversation, no tools.
 - **Token Saver**: keeps requests small without losing the task (see `Docs/CHANGELOG.md`).
-- **Provider profiles**: several Gemini keys or models, switchable.
+- **Provider profiles** in two sections, Google Gemini and OpenAI Compatible; several of each, switchable.
 - Terminal theme, markdown rendering, local chat history.
 
 There is no streaming: replies arrive when the model has finished.

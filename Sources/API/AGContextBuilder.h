@@ -26,6 +26,17 @@
                          tokenBudget:(NSUInteger)tokenBudget
                     generationConfig:(NSDictionary *)generationConfig;
 
+/// Same transcript, repaired and token-saved exactly like the Gemini payload, serialised for the
+/// OpenAI Chat Completions API: {"model", "messages":[system?, user, assistant{tool_calls}, tool{tool_call_id}...], "tools"?}.
+/// Every tool message carries the id of the call it answers (matched by position, so chats that
+/// started on Gemini or lack ids still produce a valid request). `tools` is in OpenAI format.
++ (NSDictionary *)openAIPayloadForMessages:(NSArray *)messages
+                                 pureChat:(BOOL)pureChat
+                             systemPrompt:(NSString *)systemPrompt
+                                    tools:(NSArray *)openAITools
+                              tokenBudget:(NSUInteger)tokenBudget
+                                    model:(NSString *)model;
+
 /// Rough token estimate (the real tokenizer is not available offline).
 + (NSUInteger)estimateTokensForText:(NSString *)text;
 
