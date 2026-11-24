@@ -1,6 +1,6 @@
 #import <Foundation/Foundation.h>
 
-/// The model-facing tools: runShellCommand, readFile, writeFile, editFile.
+/// The model-facing tools: runShellCommand, readFile, writeFile, editFile, deleteFile.
 /// Every path goes through AGGuardrails/AGPathJail; every result is bounded.
 @interface AGAgentTools : NSObject
 
@@ -20,6 +20,15 @@
 + (NSString *)readFileAtPath:(NSString *)path lineStart:(NSInteger)lineStart lineEnd:(NSInteger)lineEnd workspace:(NSString *)workspace;
 + (NSString *)writeFileAtPath:(NSString *)path content:(id)content workspace:(NSString *)workspace;
 + (NSString *)editFileAtPath:(NSString *)path oldText:(NSString *)oldText newText:(NSString *)newText replaceAll:(BOOL)replaceAll workspace:(NSString *)workspace;
+
+/// Moves a file or folder into `<workspace>/.agent-trash/<timestamp>/` after the user
+/// confirms (unless confirmation is switched off). Nothing is ever deleted for good,
+/// and the workspace, the Theos folder, `.git` and the trash itself cannot be moved.
+/// Folders need `recursive`. A symlink is removed itself; its target is never touched.
++ (NSString *)deleteFileAtPath:(NSString *)path recursive:(BOOL)recursive workspace:(NSString *)workspace isCancelled:(BOOL (^)(void))cancelled;
+
+/// Name of the trash folder inside the workspace.
++ (NSString *)trashDirectoryName;
 
 /// Max characters of one tool result sent to the model (default 8000).
 + (NSUInteger)toolOutputLimit;

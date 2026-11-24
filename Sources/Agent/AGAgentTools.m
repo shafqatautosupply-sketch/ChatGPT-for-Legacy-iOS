@@ -1,6 +1,7 @@
 #import "AGAgentTools.h"
 #import "AGGuardrails.h"
 #import "AGShellRunner.h"
+#import "AGApproval.h"
 #import "AGTextUtil.h"
 #include <string.h>
 #include <sys/stat.h>
@@ -55,7 +56,13 @@ static NSDictionary *AGTool(NSString *name, NSString *description, NSDictionary 
 			AGProp(@"INTEGER", @"Last line (optional)"), @"line_end", nil],
 		[NSArray arrayWithObject:@"filepath"]);
 
-	NSArray *declarations = [NSArray arrayWithObjects:shell, read, write, edit, nil];
+	NSDictionary *del = AGTool(@"deleteFile", @"Move a file or folder to the workspace's .agent-trash (recoverable with mv; nothing is deleted for good). The user is asked to confirm. Folders need recursive=true.",
+		[NSDictionary dictionaryWithObjectsAndKeys:
+			AGProp(@"STRING", @"Path relative to the workspace"), @"filepath",
+			AGProp(@"BOOLEAN", @"Required to remove a folder (default false)"), @"recursive", nil],
+		[NSArray arrayWithObject:@"filepath"]);
+
+	NSArray *declarations = [NSArray arrayWithObjects:shell, read, write, edit, del, nil];
 	return [NSArray arrayWithObject:[NSDictionary dictionaryWithObject:declarations forKey:@"functionDeclarations"]];
 }
 
@@ -163,6 +170,11 @@ static BOOL AGBool(id value) {
 		NSString *newText = AGString([args objectForKey:@"new_text"]);
 		if (path == nil || oldText == nil || newText == nil) return @"Error: 'filepath', 'old_text' and 'new_text' are required.";
 		return [self editFileAtPath:path oldText:oldText newText:newText replaceAll:AGBool([args objectForKey:@"replace_all"]) workspace:workspace];
+	}
+	if ([name isEqualToString:@"deleteFile"]) {
+		NSString *path = AGString([args objectForKey:@"filepath"]);
+		if (path == nil) return @"Error: 'filepath' (string) is required.";
+		return [self deleteFileAtPath:path recursive:AGBool([args objectForKey:@"recursive"]) workspace:workspace isCancelled:cancelled];
 	}
 	return [NSString stringWithFormat:@"Error: Unknown tool function '%@'", name ?: @""];
 }
@@ -292,6 +304,115 @@ static BOOL AGBool(id value) {
 	if (mode != nil) [fm setAttributes:[NSDictionary dictionaryWithObject:mode forKey:NSFilePosixPermissions] ofItemAtPath:canonical error:nil];
 
 	return [NSString stringWithFormat:@"Success: edited %@ (%lu replacement%@).", path, (unsigned long)(replaceAll ? count : 1), (replaceAll && count != 1) ? @"s" : @""];
+}
+
+#pragma mark - Deleting (to the trash)
+
+static NSString * const AGTrashName = @".agent-trash";
+
++ (NSString *)trashDirectoryName { return AGTrashName; }
+
+/// Number of entries below `directory`, capped so a huge tree cannot stall the prompt.
+static NSUInteger AGCountEntries(NSString *directory, BOOL *capped) {
+	static const NSUInteger cap = 5000;
+	NSUInteger count = 0;
+	NSDirectoryEnumerator *walker = [[NSFileManager defaultManager] enumeratorAtPath:directory];
+	while ([walker nextObject] != nil) {
+		if (++count >= cap) { if (capped) *capped = YES; break; }
+	}
+	return count;
+}
+
++ (NSString *)deleteFileAtPath:(NSString *)path recursive:(BOOL)recursive workspace:(NSString *)workspace isCancelled:(BOOL (^)(void))cancelled {
+	NSString *trimmed = path;
+	while ([trimmed length] > 1 && [trimmed hasSuffix:@"/"]) trimmed = [trimmed substringToIndex:[trimmed length] - 1];
+	if ([trimmed length] == 0 || [trimmed isEqualToString:@"/"]) return @"Error: refusing to delete that path.";
+	NSString *leaf = [trimmed lastPathComponent];
+	if ([leaf isEqualToString:@"."] || [leaf isEqualToString:@".."]) return @"Error: name the file or folder itself, not '.' or '..'.";
+
+	// Resolve the FOLDER the item lives in; the item itself is looked at without following a
+	// final symlink, so a link is removed on its own and its target is never touched.
+	NSString *parentPart = [trimmed stringByDeletingLastPathComponent];
+	if ([parentPart length] == 0) parentPart = @".";
+	NSString *reason = nil;
+	NSString *parent = [AGGuardrails authorizePath:parentPart relativeTo:workspace forWrite:YES reason:&reason];
+	if (parent == nil) return [NSString stringWithFormat:@"Error: %@", reason];
+	NSString *full = [parent stringByAppendingPathComponent:leaf];
+
+	struct stat st;
+	if (lstat([full fileSystemRepresentation], &st) != 0) return [NSString stringWithFormat:@"Error: '%@' does not exist.", path];
+	BOOL isLink = S_ISLNK(st.st_mode);
+	BOOL isDir = S_ISDIR(st.st_mode);
+
+	if (isLink) {
+		if ([AGGuardrails isProtectedForWrite:full]) return [NSString stringWithFormat:@"Error: BLOCKED (Guardrails): '%@' is inside a protected Theos directory (read-only).", path];
+	} else {
+		NSString *checked = [AGGuardrails authorizePath:full relativeTo:@"/" forWrite:YES reason:&reason];
+		if (checked == nil) return [NSString stringWithFormat:@"Error: %@", reason];
+	}
+
+	// The roots themselves (and anything that contains them) are never deletable.
+	for (NSString *root in [AGGuardrails allowedRoots]) {
+		if ([full isEqualToString:root] || [root hasPrefix:[full stringByAppendingString:@"/"]]) {
+			return @"Error: BLOCKED (Guardrails): the workspace and the Theos folder cannot be deleted.";
+		}
+	}
+	// .git is the undo button; the trash must stay under the user's control.
+	for (NSString *component in [full pathComponents]) {
+		if ([component isEqualToString:@".git"] || [component isEqualToString:AGTrashName]) {
+			return @"Error: BLOCKED (Guardrails): .git and the trash folder are protected.";
+		}
+	}
+
+	BOOL capped = NO;
+	NSUInteger entries = 0;
+	if (isDir) {
+		entries = AGCountEntries(full, &capped);
+		if (!recursive) return [NSString stringWithFormat:@"Error: '%@' is a folder with %lu%@ item(s). Set recursive=true to move it to the trash.", path, (unsigned long)entries, capped ? @"+" : @""];
+	}
+
+	NSString *workspaceRoot = [AGGuardrails authorizePath:workspace relativeTo:@"/" forWrite:NO reason:&reason];
+	if (workspaceRoot == nil) return [NSString stringWithFormat:@"Error: %@", reason];
+	NSString *shown = [full hasPrefix:[workspaceRoot stringByAppendingString:@"/"]] ? [full substringFromIndex:[workspaceRoot length] + 1] : full;
+
+	if ([AGApproval confirmDeleteEnabled]) {
+		NSString *what = isLink ? @"symbolic link (only the link is removed)"
+			: isDir ? [NSString stringWithFormat:@"folder, %lu%@ item(s)", (unsigned long)entries, capped ? @"+" : @""]
+			: [NSString stringWithFormat:@"file, %lld bytes", (long long)st.st_size];
+		NSString *denial = nil;
+		BOOL approved = [AGApproval requestApprovalForKey:nil title:@"Agent wants to delete"
+			detail:[NSString stringWithFormat:@"%@\n(%@)\nIt is moved to %@ and can be restored.", shown, what, AGTrashName]
+			taskLabel:nil isCancelled:cancelled denial:&denial];
+		if (!approved) return denial;
+	}
+
+	NSFileManager *fm = [NSFileManager defaultManager];
+	NSDateFormatter *formatter = [[[NSDateFormatter alloc] init] autorelease];
+	[formatter setLocale:[[[NSLocale alloc] initWithLocaleIdentifier:@"en_US_POSIX"] autorelease]];
+	[formatter setDateFormat:@"yyyyMMdd-HHmmss"];
+	NSString *stamp = [formatter stringFromDate:[NSDate date]];
+	NSString *trashRoot = [workspaceRoot stringByAppendingPathComponent:AGTrashName];
+	NSString *batch = [trashRoot stringByAppendingPathComponent:stamp];
+	for (int n = 2; [fm fileExistsAtPath:batch] && n < 200; n++) {
+		batch = [trashRoot stringByAppendingPathComponent:[NSString stringWithFormat:@"%@-%d", stamp, n]];
+	}
+	NSError *error = nil;
+	if (![fm createDirectoryAtPath:batch withIntermediateDirectories:YES attributes:nil error:&error]) {
+		return [NSString stringWithFormat:@"Error: could not create the trash folder (%@). Nothing was deleted.", [error localizedDescription]];
+	}
+	NSString *destination = [batch stringByAppendingPathComponent:leaf];
+	if (![fm moveItemAtPath:full toPath:destination error:&error]) {
+		return [NSString stringWithFormat:@"Error: could not move '%@' to the trash (%@). Nothing was deleted.", path, [error localizedDescription]];
+	}
+
+	// Where it came from, so it can be put back.
+	NSString *logPath = [trashRoot stringByAppendingPathComponent:@"log.txt"];
+	NSString *old = [NSString stringWithContentsOfFile:logPath encoding:NSUTF8StringEncoding error:nil] ?: @"";
+	NSString *line = [NSString stringWithFormat:@"%@\t%@\t->\t%@/%@\n", stamp, shown, [batch lastPathComponent], leaf];
+	[[old stringByAppendingString:line] writeToFile:logPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+
+	return [NSString stringWithFormat:@"Success: moved '%@' to the trash as %@/%@/%@. Restore with: mv %@/%@/%@ <destination>. Nothing was permanently deleted.",
+		shown, AGTrashName, [batch lastPathComponent], leaf, AGTrashName, [batch lastPathComponent], leaf];
 }
 
 @end

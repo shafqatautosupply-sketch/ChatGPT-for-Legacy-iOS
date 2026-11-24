@@ -38,6 +38,10 @@
                    forWrite:(BOOL)write
                      reason:(NSString **)reason;
 
+/// YES if `canonical` is inside a Theos directory the agent may read but never change
+/// (bin, makefiles, vendor, templates, sdks), or is one of those directories itself.
++ (BOOL)isProtectedForWrite:(NSString *)canonical;
+
 // --- Command checks ---
 /// Absolute path of an allowed binary found on the fixed exec PATH, or nil.
 + (NSString *)resolveBinary:(NSString *)name;

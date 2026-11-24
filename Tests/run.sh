@@ -18,11 +18,12 @@ OUT="$(mktemp -d)"; fail=0
 run() { name=$1; shift; echo "=== $name"; rm -f "$REAL_HOME/GNUstep/Defaults/$name.plist" ; if ! $CC "$@" $LIBS -o "$OUT/$name" 2>"$OUT/$name.log"; then echo "BUILD FAILED"; cat "$OUT/$name.log"; fail=1; return; fi
         NSZombieEnabled=YES NSDeallocateZombies=NO "$OUT/$name" 2>&1 | tee "$OUT/$name.out" | grep -E "PASS|FAIL|ALL|SOME|===|deallocated instance" ; [ "${PIPESTATUS[0]}" -eq 0 ] || fail=1; }
 
-run shell    "$HERE/ShellGuardrailsTests.m"   $S/Agent/AGShellRunner.m $S/Agent/AGGuardrails.m $S/Agent/AGPathJail.m
+run shell    "$HERE/ShellGuardrailsTests.m"   $S/Agent/AGShellRunner.m $S/Agent/AGApproval.m $S/Agent/AGGuardrails.m $S/Agent/AGPathJail.m
+run approval "$HERE/ApprovalTests.m"         $S/Support/AGTextUtil.m $S/Agent/AGAgentTools.m $S/Agent/AGShellRunner.m $S/Agent/AGApproval.m $S/Agent/AGGuardrails.m $S/Agent/AGPathJail.m
 run text     "$HERE/TextUtilTests.m"          $S/Support/AGTextUtil.m
-run tools    "$HERE/AgentToolsTests.m"        $S/Support/AGTextUtil.m $S/Agent/AGAgentTools.m $S/Agent/AGShellRunner.m $S/Agent/AGGuardrails.m $S/Agent/AGPathJail.m
+run tools    "$HERE/AgentToolsTests.m"        $S/Support/AGTextUtil.m $S/Agent/AGAgentTools.m $S/Agent/AGShellRunner.m $S/Agent/AGApproval.m $S/Agent/AGGuardrails.m $S/Agent/AGPathJail.m
 run context  "$HERE/ContextBuilderTests.m"    $S/API/AGContextBuilder.m $S/Model/AGMessage.m
-run openai   "$HERE/OpenAIPayloadTests.m"     $S/API/AGContextBuilder.m $S/Agent/AGAgentTools.m $S/Agent/AGShellRunner.m $S/Agent/AGGuardrails.m $S/Agent/AGPathJail.m $S/Support/AGTextUtil.m $S/Model/AGMessage.m
+run openai   "$HERE/OpenAIPayloadTests.m"     $S/API/AGContextBuilder.m $S/Agent/AGAgentTools.m $S/Agent/AGShellRunner.m $S/Agent/AGApproval.m $S/Agent/AGGuardrails.m $S/Agent/AGPathJail.m $S/Support/AGTextUtil.m $S/Model/AGMessage.m
 run config   "$HERE/ProviderConfigTests.m"    $S/API/AGProviderConfig.m $S/Model/AGMessage.m
 run store    "$HERE/ConversationStoreTests.m" $S/Storage/AGConversationStore.m $S/Model/AGMessage.m $S/Model/AGConversation.m \
              -include "$HERE/support/dispatch_shim.h" -include "$HERE/support/cf_shim.h"
@@ -46,7 +47,7 @@ loop() { mode=$1; shift
 echo "=== loop (real AGChatClient agent loop, fake server)"
 OUT_DIR="$OUT"
 if $CC -I$HERE/support -I$S/Support -include "$HERE/support/dispatch_shim.h" -include "$HERE/support/cf_shim.h" "$HERE/AgentLoopTests.m" \
-   $S/API/AGChatClient.m $S/API/AGProviderConfig.m $S/API/AGContextBuilder.m $S/API/AGHTTPClient.m $S/Agent/AGAgentTools.m $S/Agent/AGShellRunner.m \
+   $S/API/AGChatClient.m $S/API/AGProviderConfig.m $S/API/AGContextBuilder.m $S/API/AGHTTPClient.m $S/Agent/AGAgentTools.m $S/Agent/AGShellRunner.m $S/Agent/AGApproval.m \
    $S/Agent/AGGuardrails.m $S/Agent/AGPathJail.m $S/Support/AGTextUtil.m $S/Storage/AGConversationStore.m $S/Model/AGMessage.m $S/Model/AGConversation.m \
    $LIBS -lcurl -o "$OUT/loop" 2>"$OUT/loop.log"; then
   loop normal; loop same; loop steps; loop openai; loop openai-pure; loop openai-401

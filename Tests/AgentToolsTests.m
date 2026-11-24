@@ -43,10 +43,10 @@ int main(){ @autoreleasepool {
  NSMutableString *log=[NSMutableString string]; for(int i=0;i<3000;i++)[log appendFormat:@"compiling file %d\n",i]; [log appendString:@"error: undefined symbol _foo\n"];
  NSString *c=[AGAgentTools clipText:log toLimit:4000 tailFraction:0.7]; CHECK("clip keeps final error", [c rangeOfString:@"undefined symbol _foo"].location!=NSNotFound && [c rangeOfString:@"compiling file 0\n"].location!=NSNotFound && [c length]<4200);
  { NSArray *oa=[AGAgentTools openAIToolDeclarations]; NSArray *gm=[[[AGAgentTools toolDeclarations] objectAtIndex:0] objectForKey:@"functionDeclarations"];
-   BOOL shape=[oa count]==[gm count] && [oa count]==4; NSMutableSet *names=[NSMutableSet set];
+   BOOL shape=[oa count]==[gm count] && [oa count]==5; NSMutableSet *names=[NSMutableSet set];
    for(NSDictionary *t in oa){ NSDictionary *f=[t objectForKey:@"function"]; shape = shape && [[t objectForKey:@"type"] isEqual:@"function"] && [[f objectForKey:@"parameters"] objectForKey:@"properties"] && [[[f objectForKey:@"parameters"] objectForKey:@"type"] isEqual:@"object"]; [names addObject:[f objectForKey:@"name"]];
      for(NSString *k in [[f objectForKey:@"parameters"] objectForKey:@"properties"]) shape = shape && [[[[[f objectForKey:@"parameters"] objectForKey:@"properties"] objectForKey:k] objectForKey:@"type"] isEqualToString:[[[[[f objectForKey:@"parameters"] objectForKey:@"properties"] objectForKey:k] objectForKey:@"type"] lowercaseString]]; }
-   CHECK("OpenAI tool format: type=function, lowercase schema types, same 4 tools", shape && [names containsObject:@"editFile"] && [names containsObject:@"runShellCommand"]);
+   CHECK("OpenAI tool format: type=function, lowercase schema types, same 5 tools, incl. deleteFile", shape && [names containsObject:@"editFile"] && [names containsObject:@"deleteFile"] && [names containsObject:@"runShellCommand"]);
    NSDictionary *edit=nil; for(NSDictionary *t in oa) if([[[t objectForKey:@"function"] objectForKey:@"name"] isEqual:@"editFile"]) edit=[t objectForKey:@"function"];
    CHECK("required list and boolean/integer types survive conversion", [[[edit objectForKey:@"parameters"] objectForKey:@"required"] containsObject:@"old_text"] && [[[[[edit objectForKey:@"parameters"] objectForKey:@"properties"] objectForKey:@"replace_all"] objectForKey:@"type"] isEqual:@"boolean"]); }
  NSString *decl=[[AGAgentTools toolDeclarations] description]; printf("tool declaration size: %lu chars (~%lu tokens, sent every request)\n",(unsigned long)[decl length],(unsigned long)[decl length]/4);

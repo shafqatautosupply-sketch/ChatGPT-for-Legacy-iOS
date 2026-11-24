@@ -60,3 +60,15 @@ The guardrails are the only barrier.
 - A confirmation dialog for destructive commands (`mv` over existing files, large `cp`).
 - Run builds as a separate low-privilege user (needs a helper binary and a setuid step).
 - Keychain storage for the API key.
+
+
+## Approvals, deleting and background (unreleased)
+
+- `make`, `python` and `python3` ask the user first (Deny / Allow once / Allow for this task). A Makefile or
+  script can run any code as the app's user, so the prompt is a human check, not a sandbox: it shows the first
+  lines of what will run, not the modules or files it pulls in. Turning the switch off removes the main
+  protection against a prompt-injected model.
+- Deleting is the native `deleteFile` tool (move to `.agent-trash`, confirm, never permanent). Raw `rm` is not
+  allowed. `make`/`python` can still delete anything the app's user can; the delete tool does not change that.
+- Background mode keeps the process alive, so an approval can be waiting while the app is not visible; it is then asked as a system dialog over the current app. The agent
+  thread waits (default 10 minutes, then denies). If iOS kills the app meanwhile, the task is simply gone.

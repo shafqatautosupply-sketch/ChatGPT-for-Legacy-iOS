@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+- **`deleteFile` tool.** Moves a file or folder to `<workspace>/.agent-trash/<timestamp>/` (log in `log.txt`,
+  restore with `mv`); nothing is ever deleted for good. Refuses the workspace, the Theos folder and their
+  parents, Theos read-only dirs, `.git` and the trash; a symlink is moved itself and its target is never
+  touched; folders need `recursive=true`. `rm` stays off the allowed list.
+- **Confirmation prompts** for `make`, `python`, `python3` (`python` and `python3` are new on the default allowed list; if you saved your own Allowed Binaries list, add them there: the list is sent to the model in the `runShellCommand` description, and the prompt applies whatever the list says) and for deletes:
+  Deny / Allow once / Allow for this task (forgotten when the next task starts or Stop is tapped). The prompt
+  shows the command, the folder and the first lines of the script or Makefile. No answer in 10 minutes = denied;
+  with no approval screen installed everything gated is denied. Switches: Settings > Agent Guardrails > Ask me before.
+- **Background running.** `Info.plist` asks for the private modes `continuous` and `unboundedTaskCompletion`
+  (jailbroken iOS honours them). While a task runs a background task assertion is held, and a local notification
+  says when it finished. No audio is played. The debug log records `backgroundTimeRemaining` when the app goes to
+  the background ("unlimited" = the plist modes are in effect).
+- **Questions over other apps.** When the app is not visible, an approval question is shown as a system dialog
+  (CFUserNotification, drawn by SpringBoard; Deny is the default button) so you can answer from anywhere, also on
+  the lock screen; the agent thread waits for the tap. If iOS dismisses it early it is shown again (3 times), and if
+  the system dialog is unavailable a local notification is posted instead and the question waits in the app.
+  Coming back to the app swaps the dialog for the in-app alert. Switches and a "Test the approval dialog" row:
+  Settings > Agent Guardrails > Background.
+- New host suite `ApprovalTests.m` (prompt/deny/allow/timeout/Stop, and 40+ delete cases including the attacks).
+  The UIKit parts are not covered by host tests and were only syntax-checked against stubs.
 ## 1.2.0
 - **OpenAI-compatible endpoints** next to Google Gemini. *Settings > Model Configurations* now has two sections,
   "Google Gemini" (as before) and "OpenAI Compatible" (OpenAI, OpenRouter, DeepSeek, Groq, LM Studio, Ollama...),

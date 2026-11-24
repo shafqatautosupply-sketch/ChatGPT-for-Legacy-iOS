@@ -37,7 +37,7 @@ static NSDictionary *B(NSArray *m, BOOL pure, NSUInteger budget){ return [AGCont
 int main(){ @autoreleasepool {
  NSString *why=@"";
  { NSArray *m=[NSArray arrayWithObjects:U(@"hi"),A(@"hello"),nil]; NSDictionary *p=B(m,NO,0);
-   CHECK("basic: model, system first, user/assistant roles, tools present", [[p objectForKey:@"model"] isEqual:@"gpt-x"] && Valid([p objectForKey:@"messages"],&why) && [[[[p objectForKey:@"messages"] objectAtIndex:0] objectForKey:@"role"] isEqual:@"system"] && [[p objectForKey:@"tools"] count]==4); }
+   CHECK("basic: model, system first, user/assistant roles, tools present", [[p objectForKey:@"model"] isEqual:@"gpt-x"] && Valid([p objectForKey:@"messages"],&why) && [[[[p objectForKey:@"messages"] objectAtIndex:0] objectForKey:@"role"] isEqual:@"system"] && [[p objectForKey:@"tools"] count]==5); }
  { NSArray *m=[NSArray arrayWithObjects:U(@"go"),Call1(@"runShellCommand",[NSDictionary dictionaryWithObject:@"ls" forKey:@"command"],@"call_abc"),T(@"a.m"),A(@"done"),nil]; NSDictionary *p=B(m,NO,0);
    NSArray *o=[p objectForKey:@"messages"]; CHECK("call + result: assistant has tool_calls, tool message carries the same id", Valid(o,&why) && [[[o objectAtIndex:3] objectForKey:@"tool_call_id"] isEqual:@"call_abc"]);
    if(!Valid(o,&why))printf("   why: %s\n",[why UTF8String]); }

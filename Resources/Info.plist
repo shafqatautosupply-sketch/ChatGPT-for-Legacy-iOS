@@ -31,6 +31,11 @@
 	</array>
 	<key>UIPrerenderedIcon</key>
 	<true/>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>continuous</string>
+		<string>unboundedTaskCompletion</string>
+	</array>
 	<key>UIDeviceFamily</key>
 	<array>
 		<integer>1</integer>

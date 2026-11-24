@@ -2,6 +2,9 @@
 #import "AGProviderConfig.h"
 #import "AGGuardrails.h"
 #import "AGHTTPClient.h"
+#import "AGApproval.h"
+#import "AGBackgroundKeeper.h"
+#import "AGApprovalPresenter.h"
 #import <QuartzCore/QuartzCore.h>
 
 @interface AGAgentTextEditorViewController : UITableViewController <UIAlertViewDelegate>
@@ -176,7 +179,7 @@
 @synthesize timeoutField = _timeoutField;
 @synthesize stepsField = _stepsField;
 
-enum { AGSectionWorkspace = 0, AGSectionInterval, AGSectionLimits, AGSectionTLS, AGSectionLists, AGSectionCount };
+enum { AGSectionWorkspace = 0, AGSectionInterval, AGSectionLimits, AGSectionConfirm, AGSectionBackground, AGSectionTLS, AGSectionLists, AGSectionCount };
 
 - (id)init {
 	self = [super initWithStyle:UITableViewStyleGrouped];
@@ -222,6 +225,8 @@ enum { AGSectionWorkspace = 0, AGSectionInterval, AGSectionLimits, AGSectionTLS,
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
 	if (section == AGSectionLimits) return 2;
+	if (section == AGSectionConfirm) return 2;
+	if (section == AGSectionBackground) return 3;
 	if (section == AGSectionLists) return 4;
 	return 1;
 }
@@ -231,6 +236,8 @@ enum { AGSectionWorkspace = 0, AGSectionInterval, AGSectionLimits, AGSectionTLS,
 		case AGSectionWorkspace: return @"Workspace Directory";
 		case AGSectionInterval: return @"Minimum seconds between requests";
 		case AGSectionLimits: return @"Safety limits";
+		case AGSectionConfirm: return @"Ask me before";
+		case AGSectionBackground: return @"Background";
 		case AGSectionTLS: return @"Network security";
 		default: return @"Agent Guardrails";
 	}
@@ -238,6 +245,8 @@ enum { AGSectionWorkspace = 0, AGSectionInterval, AGSectionLimits, AGSectionTLS,
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
 	if (section == AGSectionLimits) return @"Row 1: seconds before a running command is killed. Row 2: maximum model requests per task, a guard against runaway loops.";
+	if (section == AGSectionConfirm) return @"Row 1: the agent runs make or python (a Makefile or script can run any code as this app; the prompt shows its first lines). Row 2: the agent moves a file or folder to the trash. With no answer in 10 minutes the action is not done.";
+	if (section == AGSectionBackground) return @"Row 1: keep a running task going after you leave the app and notify you when it finishes. Row 2: when the app is not visible, questions appear as a system dialog over whatever you are doing; if that is not possible you get a notification instead. Row 3 tries it.";
 	if (section == AGSectionTLS) return @"Certificates are verified against the bundled CA list. Turn this on only if a verified connection fails and you accept that anyone on the network could read your API key.";
 	if (section == AGSectionLists) return @"Commands run without a shell: pipes, redirects, ; and $() are not available. Hard Block and Secret paths always include the built-in list; entries here are added to it.";
 	return nil;
@@ -267,6 +276,23 @@ enum { AGSectionWorkspace = 0, AGSectionInterval, AGSectionLimits, AGSectionTLS,
 			return (indexPath.row == 0)
 				? [self fieldCellWithID:@"TimeoutCell" field:self.timeoutField label:@"Command timeout (seconds)" tableView:tableView]
 				: [self fieldCellWithID:@"StepsCell" field:self.stepsField label:@"Max agent steps per task" tableView:tableView];
+		case AGSectionConfirm:
+			return (indexPath.row == 0)
+				? [self switchCellWithID:@"ConfirmCodeCell" title:@"make / python" on:[AGApproval confirmCodeEnabled] action:@selector(confirmCodeChanged:) tableView:tableView]
+				: [self switchCellWithID:@"ConfirmDeleteCell" title:@"Deleting files" on:[AGApproval confirmDeleteEnabled] action:@selector(confirmDeleteChanged:) tableView:tableView];
+		case AGSectionBackground:
+			if (indexPath.row == 0) return [self switchCellWithID:@"BackgroundCell" title:@"Keep running in background" on:[AGBackgroundKeeper enabled] action:@selector(backgroundChanged:) tableView:tableView];
+			if (indexPath.row == 1) return [self switchCellWithID:@"GlobalPromptCell" title:@"Ask over other apps" on:[AGApprovalPresenter globalDialogsEnabled] action:@selector(globalPromptChanged:) tableView:tableView];
+			{
+				UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"TestPromptCell"];
+				if (cell == nil) {
+					cell = [[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"TestPromptCell"] autorelease];
+					cell.selectionStyle = UITableViewCellSelectionStyleBlue;
+					cell.textLabel.textColor = [UIColor colorWithRed:0.0f green:0.4f blue:0.8f alpha:1.0f];
+				}
+				cell.textLabel.text = @"Test the approval dialog";
+				return cell;
+			}
 		case AGSectionTLS: {
 			UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"TLSCell"];
 			if (cell == nil) {
@@ -296,12 +322,38 @@ enum { AGSectionWorkspace = 0, AGSectionInterval, AGSectionLimits, AGSectionTLS,
 	}
 }
 
+- (UITableViewCell *)switchCellWithID:(NSString *)identifier title:(NSString *)title on:(BOOL)on action:(SEL)action tableView:(UITableView *)tableView {
+	UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:identifier];
+	if (cell == nil) {
+		cell = [[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:identifier] autorelease];
+		cell.selectionStyle = UITableViewCellSelectionStyleNone;
+		cell.accessoryView = [[[UISwitch alloc] initWithFrame:CGRectZero] autorelease];
+	}
+	cell.textLabel.text = title;
+	UISwitch *toggle = (UISwitch *)cell.accessoryView;
+	[toggle removeTarget:nil action:NULL forControlEvents:UIControlEventValueChanged];
+	[toggle addTarget:self action:action forControlEvents:UIControlEventValueChanged];
+	toggle.on = on;
+	return cell;
+}
+
+- (void)setBool:(BOOL)value forKey:(NSString *)key {
+	[[NSUserDefaults standardUserDefaults] setBool:value forKey:key];
+	[[NSUserDefaults standardUserDefaults] synchronize];
+}
+
+- (void)confirmCodeChanged:(UISwitch *)sender { [self setBool:sender.isOn forKey:@"agent_confirm_code"]; }
+- (void)confirmDeleteChanged:(UISwitch *)sender { [self setBool:sender.isOn forKey:@"agent_confirm_delete"]; }
+- (void)backgroundChanged:(UISwitch *)sender { [self setBool:sender.isOn forKey:@"agent_background_enabled"]; }
+- (void)globalPromptChanged:(UISwitch *)sender { [self setBool:sender.isOn forKey:@"agent_global_prompts"]; }
+
 - (void)tlsSwitchChanged:(UISwitch *)sender {
 	[AGHTTPClient setInsecureTLSEnabled:sender.isOn];
 }
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
 	[tableView deselectRowAtIndexPath:indexPath animated:YES];
+	if (indexPath.section == AGSectionBackground && indexPath.row == 2) { [AGApprovalPresenter runTestPrompt]; return; }
 	if (indexPath.section != AGSectionLists) return;
 
 	NSString *builtIn = nil;

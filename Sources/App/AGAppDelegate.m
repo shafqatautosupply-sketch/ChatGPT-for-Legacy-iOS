@@ -2,6 +2,8 @@
 #import "AGProviderConfig.h"
 #import "AGChatViewController.h"
 #import "AGDebugLogger.h"
+#import "AGApprovalPresenter.h"
+#import "AGBackgroundKeeper.h"
 
 @implementation AGAppDelegate
 
@@ -12,6 +14,8 @@
 	[AGDebugLogger logDebug:@"Application didFinishLaunchingWithOptions started"];
 
 	[AGProviderConfig registerProviderDefaults];
+	[AGApprovalPresenter install];   // approval prompts (alert, or local notification in the background)
+	[AGBackgroundKeeper install];    // keeps a running task alive after the user leaves the app
 
 	self.window = [[[UIWindow alloc] initWithFrame:[[UIScreen mainScreen] bounds]] autorelease];
 

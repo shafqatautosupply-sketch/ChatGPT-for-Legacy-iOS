@@ -1,6 +1,7 @@
 #import "AGShellRunner.h"
 #import "AGGuardrails.h"
 #import "AGPathJail.h"
+#import "AGApproval.h"
 
 #include <unistd.h>
 #include <fcntl.h>
@@ -460,6 +461,17 @@ static void AGFreeCStringArray(char **array) {
 		}
 		if (![AGGuardrails validateArgv:argv cwd:cwd reason:&reason]) {
 			return [NSString stringWithFormat:@"[GUARDRAIL TRIGGERED] %@", reason];
+		}
+
+		// 3b. Programs that can run arbitrary code (make, python) need a human yes first.
+		if ([AGApproval argvNeedsApproval:argv]) {
+			NSString *denial = nil;
+			BOOL approved = [AGApproval requestApprovalForKey:bin
+				title:[NSString stringWithFormat:@"Agent wants to run %@", bin]
+				detail:[AGApproval describeArgv:argv cwd:cwd]
+				taskLabel:[NSString stringWithFormat:@"Allow %@ for this task", bin]
+				isCancelled:cancelled denial:&denial];
+			if (!approved) return denial;
 		}
 
 		// 4. Run.

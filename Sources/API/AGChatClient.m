@@ -3,6 +3,7 @@
 #import "AGMessage.h"
 #import "AGGuardrails.h"
 #import "AGAgentTools.h"
+#import "AGApproval.h"
 #import "AGHTTPClient.h"
 #import "AGContextBuilder.h"
 #import "AGConversationStore.h"
@@ -82,10 +83,12 @@ static volatile NSUInteger g_currentRun = 0;
 + (NSUInteger)currentRunID { return g_currentRun; }
 
 + (NSUInteger)beginRun {
+	[AGApproval resetTaskApprovals];   // "allow for this task" never outlives the task
 	@synchronized(self) { return ++g_currentRun; }
 }
 
 + (void)cancelCurrentAgentTask {
+	[AGApproval resetTaskApprovals];
 	@synchronized(self) { g_currentRun++; }
 	[self postStatus:NO forRun:NSNotFound];
 }

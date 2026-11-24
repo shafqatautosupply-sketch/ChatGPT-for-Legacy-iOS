@@ -15,6 +15,7 @@ static NSString * const AGDefaultTheosDir = @"/var/mobile/theos";
 	// added back under Settings > Agent Guardrails > Allowed Binaries.
 	return [NSArray arrayWithObjects:
 		@"make", @"clang", @"clang-3.7", @"cc", @"c++", @"as", @"ld", @"lipo", @"strip",
+		@"python", @"python3",   // always behind a confirmation prompt, see AGApproval
 		@"dpkg-deb", @"dpkg-query", @"dpkg-split", @"redeb",
 		@"ldid", @"codesign_allocate", @"class-dump", @"classdump-dyld", @"machocheck",
 		@"echo", @"cat", @"ls", @"cp", @"mv", @"mkdir", @"touch", @"ln",
