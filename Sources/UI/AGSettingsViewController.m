@@ -51,7 +51,7 @@
 }
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
 	if (section == 0) {
-		return @"Manage providers and the optional system prompt sent before each request.";
+		return @"Manage providers and the optional system prompt sent before each request. Thinking is how much a Gemini 3 or newer model reasons before it answers (Agent Mode). Auto uses Medium on Flash-Lite models, which stop too early at their minimal default, and the model's own default on the others. Higher is slower and costs more. Gemini 2.5 and OpenAI-compatible profiles ignore it.";
 	} else if (section == 3) {
 		return @"Web Access shows a chat page on your Wi-Fi for another device (Android TV, tablet, laptop). Each device has to be allowed on this phone first. No password.";
 	} else if (section == 1) {
@@ -175,10 +175,6 @@
 	}
 
 	if (indexPath.section == 0) {
-		if (indexPath.row == 2) {
-			[self showThinkingMenu];
-			return cell;
-		}
 		if (indexPath.row == 0) {
 			cell.textLabel.text = @"Model Configurations";
 		} else {

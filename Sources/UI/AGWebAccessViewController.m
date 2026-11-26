@@ -53,7 +53,7 @@ static const NSInteger AGTagDisconnectAllAlert = 2;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
-    if (section == AGSectionAddress && [AGWebAccess isEnabled]) return @"To keep the page answering while the app is not on screen, leave Keep running in background on (Agent Guardrails & Workspace). To see the Allow question over other apps, leave Ask over other apps on there too.";
+	if (section == AGSectionAddress && [AGWebAccess isEnabled]) return @"Open this on the other device";
 	if (section == AGSectionDevices) return @"Allowed devices";
 	return nil;
 }
@@ -62,7 +62,7 @@ static const NSInteger AGTagDisconnectAllAlert = 2;
 	if (section == AGSectionSwitch) {
 		return @"Shows a chat page that any browser on the same Wi-Fi can open (Android TV, tablet, laptop). A device must be allowed here first: a message appears on this phone and nothing happens until you tap Allow. There is no password. Questions about make, python and deleting files are asked on this phone, never on the web page. The connection is plain HTTP, so only use it on a network you trust.";
 	}
-    if (section == AGSectionAddress && [AGWebAccess isEnabled]) return @"To keep the page answering while the app is not on screen, leave Keep running in background on (Agent Guardrails & Workspace). To see the Allow question over other apps, leave Ask over other apps on there too.";
+	if (section == AGSectionAddress && [AGWebAccess isEnabled]) return @"To keep the page answering while the app is not on screen, leave \"Keep running in background\" on (Agent Guardrails & Workspace). To see the Allow question over other apps, leave \"Ask over other apps\" on there too.";
 	if (section == AGSectionDevices && [self.devices count] == 0) return @"No device has been allowed yet.";
 	return nil;
 }
