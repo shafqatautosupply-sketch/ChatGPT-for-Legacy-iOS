@@ -1,6 +1,6 @@
 # Host-side tests
 
-Tests for the parts of the app that do not need UIKit: the shell runner and guardrails,
+Tests for the parts of the app that do not need UIKit: the shell runner and guardrails, the web access layer (HTTP server, pairing, API),
 file tools, context builder (token saver), provider profiles, chat store and HTTPS client.
 
 ```sh

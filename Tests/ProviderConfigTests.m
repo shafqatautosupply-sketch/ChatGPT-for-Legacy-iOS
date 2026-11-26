@@ -21,7 +21,36 @@ int main(){ @autoreleasepool {
   [AGProviderConfig deleteProviderProfileWithIdentifier:[AGProviderConfig activeProviderProfileIdentifier]];
   CHECK("deleting the active profile falls back to another", [[AGProviderConfig providerProfiles] count]==2 && [[AGProviderConfig currentAPIKey] length]>0);
   CHECK("no thinkingConfig sent by default (2.5 models reject thinkingLevel)", [AGProviderConfig generationConfigForCurrentModel]==nil);
-  [d setObject:@"low" forKey:@"ag_thinking_level"]; CHECK("thinking level is opt-in", [[[[AGProviderConfig generationConfigForCurrentModel] objectForKey:@"thinkingConfig"] objectForKey:@"thinkingLevel"] isEqual:@"low"]);
+  [d setObject:@"low" forKey:@"ag_thinking_level"]; CHECK("thinkingLevel is skipped on Gemini 2.5 (it answers HTTP 400)", [AGProviderConfig generationConfigForCurrentModel]==nil);
+  [d setObject:[NSNumber numberWithInt:0] forKey:@"ag_thinking_budget"]; CHECK("hidden thinkingBudget still works on 2.5", [[[[AGProviderConfig generationConfigForCurrentModel] objectForKey:@"thinkingConfig"] objectForKey:@"thinkingBudget"] intValue]==0 && [[[AGProviderConfig generationConfigForCurrentModel] objectForKey:@"thinkingConfig"] objectForKey:@"thinkingLevel"]==nil);
+  [d removeObjectForKey:@"ag_thinking_budget"]; [d removeObjectForKey:@"ag_thinking_level"];
+  // ---- thinking level setting ----
+  CHECK("setting defaults to auto", [[AGProviderConfig thinkingLevelSetting] isEqual:@"auto"] && [[AGProviderConfig displayNameForThinkingLevel:@"default"] isEqual:@"Model default"] && [[AGProviderConfig displayNameForThinkingLevel:@"medium"] isEqual:@"Medium"]);
+  CHECK("choices are in menu order", [[AGProviderConfig thinkingLevelChoices] isEqual:[NSArray arrayWithObjects:@"auto",@"default",@"minimal",@"low",@"medium",@"high",nil]]);
+  CHECK("Gemini 3+ detected, 2.5 / aliases / others not", [AGProviderConfig modelSupportsThinkingLevel:@"gemini-3.5-flash-lite"] && [AGProviderConfig modelSupportsThinkingLevel:@"models/gemini-3-flash-preview"] && [AGProviderConfig modelSupportsThinkingLevel:@"Gemini-10-pro"]
+    && ![AGProviderConfig modelSupportsThinkingLevel:@"gemini-2.5-flash"] && ![AGProviderConfig modelSupportsThinkingLevel:@"gemini-flash-latest"] && ![AGProviderConfig modelSupportsThinkingLevel:@"gpt-4o"] && ![AGProviderConfig modelSupportsThinkingLevel:nil]);
+  CHECK("auto: Medium for Gemini 3+ Flash-Lite only", [[AGProviderConfig effectiveThinkingLevelForChoice:@"auto" model:@"gemini-3.5-flash-lite"] isEqual:@"medium"] && [AGProviderConfig effectiveThinkingLevelForChoice:@"auto" model:@"gemini-3-pro-preview"]==nil && [AGProviderConfig effectiveThinkingLevelForChoice:@"auto" model:@"gemini-2.5-flash-lite"]==nil);
+  CHECK("model default sends nothing; explicit levels are sent on Gemini 3+", [AGProviderConfig effectiveThinkingLevelForChoice:@"default" model:@"gemini-3.5-flash-lite"]==nil && [[AGProviderConfig effectiveThinkingLevelForChoice:@"high" model:@"gemini-3-pro-preview"] isEqual:@"high"] && [[AGProviderConfig effectiveThinkingLevelForChoice:@"MINIMAL" model:@"gemini-3-flash-preview"] isEqual:@"minimal"] && [AGProviderConfig effectiveThinkingLevelForChoice:@"high" model:@"gemini-2.5-pro"]==nil);
+  CHECK("unknown values behave like auto", [[AGProviderConfig effectiveThinkingLevelForChoice:@"banana" model:@"gemini-3.5-flash-lite"] isEqual:@"medium"]);
+  [AGProviderConfig setThinkingLevelSetting:@"High"]; CHECK("setting is stored lower-case", [[AGProviderConfig thinkingLevelSetting] isEqual:@"high"] && [[d stringForKey:@"ag_thinking_level"] isEqual:@"high"]);
+  [AGProviderConfig setThinkingLevelSetting:@"auto"]; CHECK("auto removes the stored value", [d objectForKey:@"ag_thinking_level"]==nil && [[AGProviderConfig thinkingLevelSetting] isEqual:@"auto"]);
+  [AGProviderConfig setThinkingLevelSetting:@"nonsense"]; CHECK("invalid choice falls back to auto", [[AGProviderConfig thinkingLevelSetting] isEqual:@"auto"]);
+  {
+    NSDictionary *cur=[AGProviderConfig activeProviderProfile]; NSString *keepModel=[AGProviderConfig configuredChatModel];
+    #define SETMODEL(m) [AGProviderConfig updateProviderProfileWithIdentifier:[AGProviderConfig activeProviderProfileIdentifier] values:[NSDictionary dictionaryWithObjectsAndKeys:[cur objectForKey:@"providerName"],@"providerName",[cur objectForKey:@"baseURL"],@"baseURL",(m),@"c-aiModel",[cur objectForKey:@"apiKey"] ?: @"",@"apiKey",nil]]
+    SETMODEL(@"gemini-3.5-flash-lite");
+    NSDictionary *tc=[[AGProviderConfig generationConfigForCurrentModel] objectForKey:@"thinkingConfig"];
+    CHECK("request: Flash-Lite 3.5 on auto gets thinkingLevel=medium", [[tc objectForKey:@"thinkingLevel"] isEqual:@"medium"] && [tc count]==1);
+    [AGProviderConfig setThinkingLevelSetting:@"default"]; CHECK("request: model default sends no thinkingConfig", [AGProviderConfig generationConfigForCurrentModel]==nil);
+    [AGProviderConfig setThinkingLevelSetting:@"low"]; [d setObject:[NSNumber numberWithInt:1024] forKey:@"ag_thinking_budget"];
+    tc=[[AGProviderConfig generationConfigForCurrentModel] objectForKey:@"thinkingConfig"];
+    CHECK("request: level and budget are never sent together", [[tc objectForKey:@"thinkingLevel"] isEqual:@"low"] && [tc objectForKey:@"thinkingBudget"]==nil);
+    [d removeObjectForKey:@"ag_thinking_budget"];
+    SETMODEL(@"gemini-3-pro-preview"); [AGProviderConfig setThinkingLevelSetting:@"auto"];
+    CHECK("request: Pro on auto sends nothing", [AGProviderConfig generationConfigForCurrentModel]==nil);
+    [AGProviderConfig setThinkingLevelSetting:@"high"]; CHECK("request: Pro on high sends high", [[[[AGProviderConfig generationConfigForCurrentModel] objectForKey:@"thinkingConfig"] objectForKey:@"thinkingLevel"] isEqual:@"high"]);
+    [AGProviderConfig setThinkingLevelSetting:@"auto"]; SETMODEL(keepModel);
+  }
   CHECK("URL builds", [[[AGProviderConfig configuredChatCompletionURL] absoluteString] rangeOfString:@"/v1beta/models/gemini-2.5-"].location!=NSNotFound && [[[AGProviderConfig configuredChatCompletionURL] absoluteString] hasSuffix:@":generateContent"]);
   // ---- OpenAI-compatible profiles ----
   CHECK("profiles saved before this feature (no providerType) count as Gemini", [[AGProviderConfig providerProfilesOfType:AGProviderTypeGemini] count]==[[AGProviderConfig providerProfiles] count] && [[AGProviderConfig providerProfilesOfType:AGProviderTypeOpenAI] count]==0);

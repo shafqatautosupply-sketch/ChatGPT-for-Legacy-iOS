@@ -1,6 +1,22 @@
 # Changelog
 
 ## Unreleased
+- **Web Access.** Settings > Other devices > Web Access starts a small HTTP server (port 8080 by default) that serves
+  a responsive chat page (`Resources/agentic-web.html`, one file, no external resources) to any browser on the
+  same network: phone, tablet, laptop, Android TV (D-pad friendly, dark/light, 17-20 px text on big screens).
+  - **No password, the phone decides.** A device taps Connect, the phone shows "Allow web access?" with the
+    device name, its address and a 4-digit code that the page shows too. Allow gives that browser a random token
+    (kept in the browser, sent as `X-AG-Token`); Deny refuses. Questions expire after 2 minutes; at most 4 wait at
+    once; one address can ask once every 2 s, a refusal blocks it for 30 s and three refusals for 10 minutes.
+    Allowed devices are listed in Settings (swipe to remove, "Disconnect all"); unused for 30 days = asks again.
+  - **One transcript.** The page and the phone show the same chat: a message sent from the web appears on the
+    phone and the other way round; the chat list, new chat, open chat and Stop work from the page. Agent Mode is
+    followed, not switched, from the page: it shows an Agent/Chat badge.
+  - **Prompts stay on the phone.** The page cannot answer approval questions (`make`, `python`, deleting files)
+    and has no endpoint for settings, keys or guardrails. While one waits, the page only says "Waiting for your
+    approval on the phone: <title>"; the command and file contents are never sent to it.
+  - Host suite `WebAccessTests.m` (84 checks, real sockets on localhost): request parsing limits, pairing rules,
+    API auth, cross-site refusal, long polling, approvals never exposed.
 - **`deleteFile` tool.** Moves a file or folder to `<workspace>/.agent-trash/<timestamp>/` (log in `log.txt`,
   restore with `mv`); nothing is ever deleted for good. Refuses the workspace, the Theos folder and their
   parents, Theos read-only dirs, `.git` and the trash; a symlink is moved itself and its target is never
@@ -21,6 +37,11 @@
   Settings > Agent Guardrails > Background.
 - New host suite `ApprovalTests.m` (prompt/deny/allow/timeout/Stop, and 40+ delete cases including the attacks).
   The UIKit parts are not covered by host tests and were only syntax-checked against stubs.
+- **Thinking level setting** (Settings > Model > Thinking): Auto, Model default, Minimal, Low, Medium, High.
+  Auto sends Medium to Gemini 3+ Flash-Lite models (at their minimal default they end multi-step agent tasks
+  too early) and nothing to other models. thinkingLevel is only sent to Gemini 3 and newer (2.5 answers HTTP 400,
+  so there it is skipped) and never together with the hidden `ag_thinking_budget`. Only used in Agent Mode.
+
 ## 1.2.0
 - **OpenAI-compatible endpoints** next to Google Gemini. *Settings > Model Configurations* now has two sections,
   "Google Gemini" (as before) and "OpenAI Compatible" (OpenAI, OpenRouter, DeepSeek, Groq, LM Studio, Ollama...),

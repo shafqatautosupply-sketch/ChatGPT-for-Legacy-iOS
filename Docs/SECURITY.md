@@ -72,3 +72,29 @@ The guardrails are the only barrier.
   allowed. `make`/`python` can still delete anything the app's user can; the delete tool does not change that.
 - Background mode keeps the process alive, so an approval can be waiting while the app is not visible; it is then asked as a system dialog over the current app. The agent
   thread waits (default 10 minutes, then denies). If iOS kills the app meanwhile, the task is simply gone.
+
+
+## Web Access (other devices on the network)
+
+What it is: an HTTP server inside the app, off by default, listening on all network interfaces of the phone while
+the switch is on. What it protects and what it does not:
+
+- **Who gets in:** only a device you allowed on the phone. There is no password; the question "Allow web access?" is
+  shown on the phone and a token is issued only after Allow. The token is random (160 bits), stored in the browser
+  and in the app's preferences (like the API key), and sent in a custom header, never in a cookie, so a web site
+  open in another tab cannot use it. Cross-site POSTs (a foreign `Origin`) are refused and no CORS headers are sent.
+- **Spam and guessing:** pairing questions are rate limited and a refused address is blocked for a while (see the
+  changelog). Anyone on the network can make the phone show the question, so read the device name, address and
+  code before tapping Allow.
+- **What an allowed device can do:** read and write the shared chat, start and stop tasks, switch chats and start a
+  new one. With Agent Mode on, a task started from the page has the same tools and the same guardrails as one started
+  on the phone. It cannot see or change settings, API keys, the system prompt or guardrails, and it cannot answer
+  approval questions: `make`, `python` and deleting files are asked on the phone only. A device that can chat can
+  still make the agent read, write and edit files inside the workspace, which needs no question; turn Web Access off
+  if you do not want that.
+- **Not protected:** the traffic is plain HTTP, so anyone on the same network can read it and could copy a token
+  from it (a hotspot you share is such a network). There is no TLS because a self-signed certificate would give every
+  browser a warning and old TV browsers refuse it. Use it at home on your own Wi-Fi. Do not forward the port to the
+  internet.
+- Limits: 16 connections at once, 16 KB of headers, 256 KB of body, 20,000 characters per message, 15 s to send a
+  request. The page is a single file with a content security policy that allows no outside resources.

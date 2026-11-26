@@ -1,6 +1,7 @@
 #import "AGBackgroundKeeper.h"
 #import "AGChatClient.h"
 #import "AGDebugLogger.h"
+#import "AGWebAccess.h"
 #import <UIKit/UIKit.h>
 #include <string.h>
 
@@ -25,6 +26,8 @@
 	[center addObserver:keeper selector:@selector(statusChanged:) name:AGAPIStatusDidChangeNotification object:nil];
 	[center addObserver:keeper selector:@selector(didEnterBackground:) name:UIApplicationDidEnterBackgroundNotification object:nil];
 	[center addObserver:keeper selector:@selector(willEnterForeground:) name:UIApplicationWillEnterForegroundNotification object:nil];
+	// The web page must keep answering while the app is not on screen.
+	[center addObserver:keeper selector:@selector(webAccessChanged:) name:AGWebAccessChangedNotification object:nil];
 }
 
 - (id)init {
@@ -41,10 +44,11 @@
 }
 
 - (void)didEnterBackground:(NSNotification *)note { [self refreshInBackground:YES]; }
+- (void)webAccessChanged:(NSNotification *)note { [self refreshInBackground:([UIApplication sharedApplication].applicationState == UIApplicationStateBackground)]; }
 - (void)willEnterForeground:(NSNotification *)note { [self refreshInBackground:NO]; }
 
 - (void)refreshInBackground:(BOOL)inBackground {
-	BOOL keep = _running && [AGBackgroundKeeper enabled];
+	BOOL keep = (_running || [AGWebAccess isRunning]) && [AGBackgroundKeeper enabled];
 	if (keep) [self beginTask]; else [self endTask];
 	if (keep && inBackground) {
 		// Diagnostic: a huge number means iOS is not limiting the process (continuous/unbounded worked).

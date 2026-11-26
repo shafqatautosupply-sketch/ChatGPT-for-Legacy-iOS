@@ -7,13 +7,15 @@
 #import "AGConversationsViewController.h"
 #import "AGConversationStore.h"
 #import "AGSettingsViewController.h"
+#import "AGWebBridge.h"
+#import "AGWebAPI.h"
 #import <QuartzCore/QuartzCore.h>
 
 // UITextView on iOS 6 insets its text by 8pt on each side.
 static const CGFloat AGTextViewHorizontalPadding = 16.0f;
 static const CGFloat AGTextViewTopPadding = 8.0f;
 
-@interface AGChatViewController () <UITextViewDelegate, AGConversationsViewControllerDelegate, UIGestureRecognizerDelegate>
+@interface AGChatViewController () <UITextViewDelegate, AGConversationsViewControllerDelegate, UIGestureRecognizerDelegate, AGWebBridge>
 
 @property (nonatomic, retain) UITextView *chatTextView;
 @property (nonatomic, retain) UIToolbar *toolbar;
@@ -285,8 +287,12 @@ static const CGFloat AGTextViewTopPadding = 8.0f;
 
     self.inputField.text = @"";
     [self dismissKeyboard];
+    [self submitUserText:trimmedText];
+}
 
-    AGMessage *outgoing = [AGMessage messageWithRole:@"user" content:trimmedText];
+/// Adds a user message and starts a run. Used by the Send button and by the web page.
+- (void)submitUserText:(NSString *)text {
+    AGMessage *outgoing = [AGMessage messageWithRole:@"user" content:text];
     [self addMessage:outgoing];
     [self persistCurrentConversation];
 
@@ -385,6 +391,7 @@ static const CGFloat AGTextViewTopPadding = 8.0f;
     self.chatTextView.attributedText = nil;
     self.currentConversationIdentifier = [AGConversationStore nextConversationIdentifier];
     [AGConversationStore setCurrentConversationIdentifier:nil];
+    [[NSNotificationCenter defaultCenter] postNotificationName:AGWebConversationChangedNotification object:nil];
 }
 
 /// Switching or clearing a chat must stop the agent: its replies would otherwise
@@ -409,18 +416,59 @@ static const CGFloat AGTextViewTopPadding = 8.0f;
 - (void)conversationsViewController:(AGConversationsViewController *)controller didSelectConversation:(AGConversation *)conversation {
     [self.navigationController popViewControllerAnimated:YES];
     if (conversation == nil) return;
-    [self stopRunningRequest];
+    [self openConversationWithIdentifier:conversation.uuid];
+}
 
-    // The Chats list only carries metadata; load the real transcript now.
-    AGConversation *full = [AGConversationStore conversationWithIdentifier:conversation.uuid];
-    if (full == nil) return;
+/// Switching chats stops the agent (see stopRunningRequest). The Chats list only carries
+/// metadata, so the real transcript is loaded here.
+- (BOOL)openConversationWithIdentifier:(NSString *)identifier {
+    AGConversation *full = [AGConversationStore conversationWithIdentifier:identifier];
+    if (full == nil) return NO;   // nothing changes, a running task keeps running
+    [self stopRunningRequest];
 
     self.currentConversationIdentifier = full.uuid;
     [AGConversationStore setCurrentConversationIdentifier:full.uuid];
     [self.allMessages removeAllObjects];
     [self.allMessages addObjectsFromArray:full.messages];
     [self rebuildLog];
+    [[NSNotificationCenter defaultCenter] postNotificationName:AGWebConversationChangedNotification object:nil];
+    return YES;
 }
+
+#pragma mark - Web page bridge (main thread; see AGWebBridge.h)
+
+- (NSDictionary *)webSnapshotKnownConversation:(NSString *)known fromIndex:(NSUInteger)index {
+    NSUInteger total = [self.allMessages count];
+    BOOL reset = (![known isKindOfClass:[NSString class]] || ![known isEqualToString:self.currentConversationIdentifier] || index > total);
+    NSUInteger start = reset ? (total > 150 ? total - 150 : 0) : index;   // a reset sends the newest 150 only
+    NSMutableArray *list = [NSMutableArray array];
+    for (NSUInteger i = start; i < total; i++) {
+        AGMessage *message = [self.allMessages objectAtIndex:i];
+        [list addObject:[AGWebAPI dictionaryForMessage:message index:i displayText:[AGMessageRenderer displayTextForMessage:message]]];
+    }
+    return [NSDictionary dictionaryWithObjectsAndKeys:
+        self.currentConversationIdentifier ?: @"", @"conversation",
+        [NSNumber numberWithBool:reset], @"reset",
+        [NSNumber numberWithUnsignedInteger:total], @"total",
+        list, @"messages",
+        [NSNumber numberWithBool:self.requestInFlight], @"running",
+        [NSNumber numberWithBool:[AGChatClient isAgentModeEnabled]], @"agent",
+        [AGProviderConfig providerDisplayName] ?: @"", @"provider",
+        [AGProviderConfig configuredChatModel] ?: @"", @"model", nil];
+}
+
+- (BOOL)webSendText:(NSString *)text error:(NSString **)error {
+    if (self.requestInFlight) {
+        if (error) *error = @"The agent is busy. Wait for it to finish, or press Stop.";
+        return NO;
+    }
+    [self submitUserText:text];
+    return YES;
+}
+
+- (void)webStop { [self stopRunningRequest]; }
+- (void)webStartNewConversation { [self resetToNewConversation]; }
+- (BOOL)webOpenConversation:(NSString *)identifier { return [self openConversationWithIdentifier:identifier]; }
 
 - (void)apiResponseReceived:(NSNotification *)notification {
     AGMessage *message = [notification object];

@@ -69,3 +69,24 @@ tokens the API reported for the previous call (input, cached, output).
   interval between requests if it keeps happening.
 - **"Stopped after N steps"**: send a message to let it continue, or raise *Max agent steps*.
 - **A command says it is not allowed**: it is not in *Allowed Binaries* (or it uses a blocked flag; the message says which).
+
+
+## Web Access: use the chat from another device
+
+1. Settings > Other devices > turn **Web Access** on. Open **Address & Devices** and read the address
+   (for example `http://192.168.1.20:8080`; tap it to copy). The phone and the other device must be on the same Wi-Fi.
+2. On the other device (Android TV browser, tablet, laptop) open that address and press **Connect**.
+   The page shows a 4-digit code.
+3. On the phone a message "Allow web access?" appears (also over other apps and on the lock screen when
+   "Ask over other apps" is on). Check the code matches, tap **Allow**.
+4. The page is now a chat window for the app. It shows the same chat as the phone, so both stay in sync.
+   When Agent Mode is on the model can use its tools from there too; questions about `make`, `python` and deleting
+   files appear on the phone, not on the page.
+
+Notes
+- Switch Web Access off, or remove a device (swipe) or use **Disconnect all devices**, to cut access at once.
+- The page works on phones, tablets and TVs: small screens get a slide-in chat list, large screens a permanent one.
+  Enter sends (on phones Enter adds a line, use Send). Light/dark toggle is in the top bar.
+- Keep "Keep running in background" (Agent Guardrails & Workspace) on, or the page stops answering when the app is
+  not on screen. If the port is taken, pick another one under Address & Devices.
+- The connection is plain HTTP: use it on a network you trust. See `Docs/SECURITY.md`.

@@ -13,7 +13,7 @@ Agentic_FILES = $(wildcard Sources/*/*.m)
 Agentic_FRAMEWORKS = UIKit Foundation CoreGraphics QuartzCore
 Agentic_CFLAGS = -Wno-error \
 	-ISources/App -ISources/API -ISources/Agent -ISources/Model \
-	-ISources/Storage -ISources/UI -ISources/Support \
+	-ISources/Storage -ISources/UI -ISources/Support -ISources/Web \
 	-IVendor/curl/include
 Agentic_LDFLAGS = \
 	Vendor/curl/lib/libcurl.a \

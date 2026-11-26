@@ -4,6 +4,7 @@
 #import "AGDebugLogger.h"
 #import "AGApprovalPresenter.h"
 #import "AGBackgroundKeeper.h"
+#import "AGWebAccess.h"
 
 @implementation AGAppDelegate
 
@@ -39,6 +40,10 @@
 
 	self.window.rootViewController = navigationController;
 	[self.window makeKeyAndVisible];
+
+	// Web page for other devices: the chat screen is the one transcript they share with the phone.
+	[AGWebAccess setBridge:(id<AGWebBridge>)rootViewController];
+	[AGWebAccess startIfEnabled];
 	[AGDebugLogger logDebug:@"Application didFinishLaunchingWithOptions completed successfully"];
 	return YES;
 }

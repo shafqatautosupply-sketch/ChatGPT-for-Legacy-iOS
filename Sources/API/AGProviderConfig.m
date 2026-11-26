@@ -253,14 +253,68 @@ static NSString * const AGDefaultModel = @"gemini-2.5-flash";
 	else [request setValue:key forHTTPHeaderField:@"x-goog-api-key"];
 }
 
+#pragma mark - Thinking level
+
+static NSString * const AGThinkingLevelKey = @"ag_thinking_level";
+
++ (NSArray *)thinkingLevelChoices {
+	return [NSArray arrayWithObjects:@"auto", @"default", @"minimal", @"low", @"medium", @"high", nil];
+}
+
++ (NSString *)thinkingLevelSetting {
+	id stored = [[NSUserDefaults standardUserDefaults] objectForKey:AGThinkingLevelKey];
+	NSString *value = [stored isKindOfClass:[NSString class]] ? [(NSString *)stored lowercaseString] : @"";
+	return [[self thinkingLevelChoices] containsObject:value] ? value : @"auto";
+}
+
++ (void)setThinkingLevelSetting:(NSString *)choice {
+	NSString *value = [choice lowercaseString];
+	if (![[self thinkingLevelChoices] containsObject:value] || [value isEqualToString:@"auto"]) {
+		[[NSUserDefaults standardUserDefaults] removeObjectForKey:AGThinkingLevelKey];   // auto is the absence of a choice
+	} else {
+		[[NSUserDefaults standardUserDefaults] setObject:value forKey:AGThinkingLevelKey];
+	}
+	[[NSUserDefaults standardUserDefaults] synchronize];
+}
+
++ (NSString *)displayNameForThinkingLevel:(NSString *)choice {
+	if ([choice isEqualToString:@"auto"]) return @"Auto";
+	if ([choice isEqualToString:@"default"]) return @"Model default";
+	if ([choice length] == 0) return @"Auto";
+	return [[[choice substringToIndex:1] uppercaseString] stringByAppendingString:[choice substringFromIndex:1]];
+}
+
++ (BOOL)modelSupportsThinkingLevel:(NSString *)model {
+	NSString *lower = [model lowercaseString];
+	NSRange marker = [lower rangeOfString:@"gemini-"];
+	if (marker.location == NSNotFound) return NO;
+	NSInteger major = 0; NSUInteger digits = 0;
+	for (NSUInteger i = marker.location + marker.length; i < [lower length]; i++) {
+		unichar c = [lower characterAtIndex:i];
+		if (c < '0' || c > '9') break;
+		major = major * 10 + (c - '0'); digits++;
+		if (digits > 3) return NO;
+	}
+	return digits > 0 && major >= 3;
+}
+
++ (NSString *)effectiveThinkingLevelForChoice:(NSString *)choice model:(NSString *)model {
+	if (![self modelSupportsThinkingLevel:model]) return nil;
+	NSString *value = [choice lowercaseString];
+	if ([value isEqualToString:@"default"]) return nil;
+	if ([value isEqualToString:@"minimal"] || [value isEqualToString:@"low"] || [value isEqualToString:@"medium"] || [value isEqualToString:@"high"]) return value;
+	// auto: Flash-Lite models think at "minimal" unless told otherwise and then end multi-step tasks too early.
+	return ([[model lowercaseString] rangeOfString:@"flash-lite"].location != NSNotFound) ? @"medium" : nil;
+}
+
 + (NSDictionary *)generationConfigForCurrentModel {
 	if ([self isOpenAICompatibleActive]) return nil; // thinking options are Gemini-specific
 	NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-	NSString *level = [defaults stringForKey:@"ag_thinking_level"];
+	NSString *level = [self effectiveThinkingLevelForChoice:[self thinkingLevelSetting] model:[self configuredChatModel]];
 	id budget = [defaults objectForKey:@"ag_thinking_budget"];
 	NSMutableDictionary *thinking = [NSMutableDictionary dictionary];
-	if ([level length] > 0) [thinking setObject:[level lowercaseString] forKey:@"thinkingLevel"];
-	if (budget != nil && [budget respondsToSelector:@selector(integerValue)]) [thinking setObject:[NSNumber numberWithInteger:[budget integerValue]] forKey:@"thinkingBudget"];
+	if ([level length] > 0) [thinking setObject:level forKey:@"thinkingLevel"];
+	else if (budget != nil && [budget respondsToSelector:@selector(integerValue)]) [thinking setObject:[NSNumber numberWithInteger:[budget integerValue]] forKey:@"thinkingBudget"];
 	if ([thinking count] == 0) return nil;
 	return [NSDictionary dictionaryWithObject:thinking forKey:@"thinkingConfig"];
 }

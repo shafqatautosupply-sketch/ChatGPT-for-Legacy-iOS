@@ -3,6 +3,7 @@
 #import "AGChatClient.h"
 #import "AGBackgroundKeeper.h"
 #import "AGMessage.h"
+#import "AGWebPairing.h"
 #import <UIKit/UIKit.h>
 #include <dlfcn.h>
 
@@ -25,6 +26,8 @@ static BOOL AGSystemDialogsResolved(void) {
 	});
 	return g_noteCreate != NULL && g_noteReceive != NULL && g_noteCancel != NULL;
 }
+
+static AGApprovalPresenter *g_presenter = nil;   // set by +install; lives for the whole process
 
 static const int AGMaxSystemDialogAttempts = 3;   // if iOS dismisses it early (lock/unlock), ask again this often
 
@@ -50,10 +53,16 @@ static const int AGMaxSystemDialogAttempts = 3;   // if iOS dismisses it early (
 }
 
 + (void)install {
-	static AGApprovalPresenter *presenter = nil;
-	if (presenter != nil) return;
-	presenter = [[AGApprovalPresenter alloc] init];   // lives for the whole process
-	[presenter start];
+	if (g_presenter != nil) return;
+	g_presenter = [[AGApprovalPresenter alloc] init];   // lives for the whole process
+	[g_presenter start];
+
+	// Web access: "Allow web access?" is asked here, on the phone, never on the web page.
+	[[AGWebPairing sharedPairing] setAsk:^id(NSString *title, NSString *detail, NSTimeInterval timeout, void (^answer)(AGPairAnswer)) {
+		return [AGApprovalPresenter askQuestionWithTitle:title detail:detail allowTitle:@"Allow" timeout:timeout answer:^(NSInteger result) { answer((AGPairAnswer)result); }];
+	} cancel:^(id handle) {
+		[AGApprovalPresenter cancelQuestion:handle];
+	}];
 }
 
 - (void)start {
@@ -99,7 +108,7 @@ static const int AGMaxSystemDialogAttempts = 3;   // if iOS dismisses it early (
 	NSString *label = [prompt objectForKey:@"label"];
 	if (![label isKindOfClass:[NSString class]]) label = nil;
 	UIAlertView *alert = [[[UIAlertView alloc] initWithTitle:[prompt objectForKey:@"title"] message:[prompt objectForKey:@"detail"]
-		delegate:self cancelButtonTitle:@"Deny" otherButtonTitles:@"Allow once", nil] autorelease];
+		delegate:self cancelButtonTitle:@"Deny" otherButtonTitles:([prompt objectForKey:@"allowTitle"] ?: @"Allow once"), nil] autorelease];
 	if (label != nil) [alert addButtonWithTitle:label];
 	self.current = alert;
 	[alert show];
@@ -124,6 +133,66 @@ static const int AGMaxSystemDialogAttempts = 3;   // if iOS dismisses it early (
 	[self finishFrontPromptWithChoice:choice];
 }
 
+#pragma mark - Questions (web pairing)
+
+- (NSTimeInterval)timeoutForPrompt:(NSDictionary *)prompt {
+	NSNumber *own = [prompt objectForKey:@"timeout"];
+	return [own isKindOfClass:[NSNumber class]] ? [own doubleValue] : [AGApproval timeout];
+}
+
++ (id)askQuestionWithTitle:(NSString *)title detail:(NSString *)detail allowTitle:(NSString *)allowTitle timeout:(NSTimeInterval)timeout answer:(void (^)(NSInteger answer))answer {
+	AGApprovalPresenter *me = g_presenter;
+	if (me == nil) return nil;
+	id handle = [NSString stringWithFormat:@"question-%08x", arc4random()];
+	AGApprovalResponder respond = [[^(AGApprovalChoice choice) { answer(choice == AGApprovalAllowOnce ? AGPairAnswerAllow : AGPairAnswerDeny); } copy] autorelease];
+	void (^onTimeout)(void) = [[^{ answer(AGPairAnswerTimedOut); } copy] autorelease];
+	NSMutableDictionary *prompt = [NSMutableDictionary dictionaryWithObjectsAndKeys:
+		title ?: @"", @"title", detail ?: @"", @"detail", [NSNull null], @"label",
+		respond, @"respond", onTimeout, @"onTimeout", allowTitle ?: @"Allow", @"allowTitle",
+		[NSNumber numberWithBool:YES], @"question", [NSNumber numberWithDouble:timeout], @"timeout", handle, @"handle", nil];
+	dispatch_async(dispatch_get_main_queue(), ^{
+		[me.queue addObject:prompt];
+		[me pump];
+	});
+	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(timeout * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+		NSMutableDictionary *waiting = [me promptWithHandle:handle];
+		if (waiting == nil) return;                    // answered or taken back already
+		void (^expired)(void) = [[[waiting objectForKey:@"onTimeout"] retain] autorelease];
+		[me removePrompt:waiting];
+		if (expired != nil) expired();
+	});
+	return handle;
+}
+
++ (void)cancelQuestion:(id)handle {
+	AGApprovalPresenter *me = g_presenter;
+	if (me == nil || handle == nil) return;
+	dispatch_async(dispatch_get_main_queue(), ^{
+		NSMutableDictionary *waiting = [me promptWithHandle:handle];
+		if (waiting != nil) [me removePrompt:waiting];
+	});
+}
+
+- (NSMutableDictionary *)promptWithHandle:(id)handle {
+	for (NSMutableDictionary *prompt in self.queue) if ([[prompt objectForKey:@"handle"] isEqual:handle]) return prompt;
+	return nil;
+}
+
+/// Takes one prompt off the queue and, if it is the one on screen, off the screen. No answer is delivered.
+- (void)removePrompt:(NSMutableDictionary *)prompt {
+	BOOL onScreen = ([self.queue count] > 0 && [self.queue objectAtIndex:0] == prompt);
+	[[prompt retain] autorelease];
+	[self.queue removeObject:prompt];
+	if (onScreen) {
+		[self withdrawSystemNote];
+		UIAlertView *alert = [[self.current retain] autorelease];
+		self.current = nil;   // so the delegate ignores the dismissal below
+		[alert dismissWithClickedButtonIndex:alert.cancelButtonIndex animated:NO];
+		[[UIApplication sharedApplication] cancelAllLocalNotifications];
+	}
+	[self pump];
+}
+
 #pragma mark - System dialog
 
 /// Deny is the default (bold) button on purpose: an accidental tap must never run code.
@@ -136,12 +205,12 @@ static const int AGMaxSystemDialogAttempts = 3;   // if iOS dismisses it early (
 		[prompt objectForKey:@"title"], @"AlertHeader",
 		[prompt objectForKey:@"detail"], @"AlertMessage",
 		@"Deny", @"DefaultButtonTitle",
-		@"Allow once", @"AlternateButtonTitle", nil];
+		([prompt objectForKey:@"allowTitle"] ?: @"Allow once"), @"AlternateButtonTitle", nil];
 	if ([label isKindOfClass:[NSString class]]) [content setObject:label forKey:@"OtherButtonTitle"];
 
 	SInt32 error = 0;
 	// Level 2 = caution icon. The timeout makes iOS withdraw the dialog when the agent stops waiting.
-	void *note = g_noteCreate(NULL, [AGApproval timeout], 2, &error, (CFDictionaryRef)content);
+	void *note = g_noteCreate(NULL, [self timeoutForPrompt:prompt], 2, &error, (CFDictionaryRef)content);
 	if (note == NULL || error != 0) {
 		if (note != NULL) CFRelease((CFTypeRef)note);
 		[prompt setObject:[NSNumber numberWithBool:YES] forKey:@"systemFailed"];
@@ -185,7 +254,7 @@ static const int AGMaxSystemDialogAttempts = 3;   // if iOS dismisses it early (
 	}
 	CFOptionFlags button = flags & 0x3;       // 0 default, 1 alternate, 2 other, 3 cancelled/withdrawn
 	if (button == 3) {
-		BOOL early = ([NSDate timeIntervalSinceReferenceDate] - _systemNoteShownAt) < ([AGApproval timeout] - 5.0);
+		BOOL early = ([NSDate timeIntervalSinceReferenceDate] - _systemNoteShownAt) < ([self timeoutForPrompt:prompt] - 5.0);
 		if (early && [[prompt objectForKey:@"attempts"] intValue] < AGMaxSystemDialogAttempts) { [self pump]; return; }  // dismissed by iOS (e.g. lock): ask again
 		if (early) { [prompt setObject:[NSNumber numberWithBool:YES] forKey:@"systemFailed"]; [self pump]; return; }   // keeps vanishing: fall back to a notification
 		[self finishFrontPromptWithChoice:AGApprovalDeny];                                                   // timed out
@@ -212,12 +281,19 @@ static const int AGMaxSystemDialogAttempts = 3;   // if iOS dismisses it early (
 /// Posted from the worker thread when it stops waiting (Stop tapped, or timeout).
 - (void)promptAbandoned:(NSNotification *)note {
 	dispatch_async(dispatch_get_main_queue(), ^{
-		[self.queue removeAllObjects];   // the worker is not waiting for any of them any more
-		[self withdrawSystemNote];
-		UIAlertView *alert = [[self.current retain] autorelease];
-		self.current = nil;               // so the delegate ignores the dismissal below
-		[alert dismissWithClickedButtonIndex:alert.cancelButtonIndex animated:NO];
-		[[UIApplication sharedApplication] cancelAllLocalNotifications];
+		// The agent stopped waiting. Questions that are not the agent's (web pairing) stay.
+		BOOL frontIsQuestion = ([self.queue count] > 0 && [[[self.queue objectAtIndex:0] objectForKey:@"question"] boolValue]);
+		NSMutableArray *keep = [NSMutableArray array];
+		for (NSMutableDictionary *prompt in self.queue) if ([[prompt objectForKey:@"question"] boolValue]) [keep addObject:prompt];
+		self.queue = keep;   // the worker is not waiting for the others any more
+		if (!frontIsQuestion) {
+			[self withdrawSystemNote];
+			UIAlertView *alert = [[self.current retain] autorelease];
+			self.current = nil;               // so the delegate ignores the dismissal below
+			[alert dismissWithClickedButtonIndex:alert.cancelButtonIndex animated:NO];
+			[[UIApplication sharedApplication] cancelAllLocalNotifications];
+			[self pump];
+		}
 	});
 }
 

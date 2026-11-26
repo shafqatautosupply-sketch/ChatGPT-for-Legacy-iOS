@@ -28,6 +28,7 @@ existing chats and settings are kept when you upgrade.
 | `Sources/Model` | `AGMessage`, `AGConversation` (Foundation only) |
 | `Sources/Storage` | Chat history on disk |
 | `Sources/UI` | Screens and the message renderer |
+| `Sources/Web` | Web Access: tiny HTTP server, phone-approved pairing, API routes (Foundation only) |
 | `Sources/Support` | Crash/debug logger |
 | `Resources` | `Info.plist`, icons, images, `cacert.pem` (CA bundle for HTTPS verification) |
 | `Vendor/curl` | Prebuilt libcurl 7.33 / OpenSSL 1.0.2 / zlib and headers |
@@ -44,6 +45,10 @@ All classes use one prefix, `AG`.
 - **Token Saver**: keeps requests small without losing the task (see `Docs/CHANGELOG.md`).
 - **Provider profiles** in two sections, Google Gemini and OpenAI Compatible; several of each, switchable.
 - Terminal theme, markdown rendering, local chat history.
+- **Web Access** (Settings > Other devices): a responsive chat page for any browser on your Wi-Fi (Android TV,
+  tablet, laptop). No password: the phone shows "Allow web access?" and nothing works until you tap Allow.
+  The page shares the phone's chat, uses Agent Mode when it is on, and approval questions (`make`, `python`,
+  deletes) are still asked on the phone only. See `Docs/MANUAL.md`.
 
 There is no streaming: replies arrive when the model has finished.
 

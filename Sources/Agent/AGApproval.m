@@ -4,6 +4,7 @@
 #include <Block.h>
 
 NSString * const AGApprovalAbandonedNotification = @"AGApprovalAbandonedNotification";
+NSString * const AGApprovalPendingChangedNotification = @"AGApprovalPendingChangedNotification";
 
 static const NSUInteger AGDetailMaxChars = 700;
 static const NSUInteger AGPreviewMaxChars = 420;
@@ -31,6 +32,7 @@ static const NSUInteger AGPreviewMaxLines = 12;
 
 static AGApprovalHandler g_handler = NULL;
 static NSMutableSet *g_taskApprovals = nil;
+static NSString *g_pendingTitle = nil;   // guarded by @synchronized([AGApproval class])
 
 @implementation AGApproval
 
@@ -49,6 +51,19 @@ static NSMutableSet *g_taskApprovals = nil;
 	NSTimeInterval seconds = (value != nil && [value respondsToSelector:@selector(doubleValue)]) ? [value doubleValue] : 600.0;
 	if (seconds < 1.0) seconds = 600.0;
 	return MIN(seconds, 3600.0);
+}
+
++ (NSString *)pendingTitle {
+	@synchronized([AGApproval class]) { return [[g_pendingTitle retain] autorelease]; }
+}
+
++ (void)setPendingTitle:(NSString *)title {
+	@synchronized([AGApproval class]) {
+		if (title == g_pendingTitle || [title isEqualToString:g_pendingTitle]) return;
+		[g_pendingTitle release];
+		g_pendingTitle = [title copy];
+	}
+	[[NSNotificationCenter defaultCenter] postNotificationName:AGApprovalPendingChangedNotification object:nil];
 }
 
 + (void)setHandler:(AGApprovalHandler)handler {
@@ -183,6 +198,7 @@ static NSString *AGFilePreview(NSString *path) {
 
 	AGApprovalTicket *ticket = [[[AGApprovalTicket alloc] init] autorelease];
 	AGApprovalResponder responder = Block_copy(^(AGApprovalChoice choice) { [ticket setChoiceOnce:(NSInteger)choice]; });
+	[self setPendingTitle:title];
 	handler(title, detail, (taskKey != nil ? taskLabel : nil), responder);
 
 	BOOL allowed = NO;
@@ -214,6 +230,7 @@ static NSString *AGFilePreview(NSString *path) {
 	}
 	Block_release(responder);
 	Block_release(handler);
+	[self setPendingTitle:nil];
 	return allowed;
 }
 

@@ -12,6 +12,14 @@
 
 + (void)install;
 
+/// A yes/no question shown the same way as an approval: an alert in the app, a system dialog when
+/// the app is not visible, a notification as the last resort. Used for "Allow web access?".
+/// `answer` gets Allow, Deny, or TimedOut (nobody answered within `timeout`); it is NOT called for a
+/// question taken back with +cancelQuestion:. Any thread. Returns a handle for +cancelQuestion:.
++ (id)askQuestionWithTitle:(NSString *)title detail:(NSString *)detail allowTitle:(NSString *)allowTitle timeout:(NSTimeInterval)timeout answer:(void (^)(NSInteger answer))answer;
+/// Takes a question that is still waiting off the screen. Any thread.
++ (void)cancelQuestion:(id)handle;
+
 /// `agent_global_prompts`, default YES: use the system dialog when the app is not visible.
 + (BOOL)globalDialogsEnabled;
 

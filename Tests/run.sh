@@ -27,6 +27,10 @@ run openai   "$HERE/OpenAIPayloadTests.m"     $S/API/AGContextBuilder.m $S/Agent
 run config   "$HERE/ProviderConfigTests.m"    $S/API/AGProviderConfig.m $S/Model/AGMessage.m
 run store    "$HERE/ConversationStoreTests.m" $S/Storage/AGConversationStore.m $S/Model/AGMessage.m $S/Model/AGConversation.m \
              -include "$HERE/support/dispatch_shim.h" -include "$HERE/support/cf_shim.h"
+# Web page for other devices: HTTP server, phone-approved pairing, API routes (real sockets on localhost)
+run web      "$HERE/WebAccessTests.m" -I$S/Web $S/Web/AGHTTPServer.m $S/Web/AGWebPairing.m $S/Web/AGWebAPI.m $S/Web/AGWebAccess.m \
+             $S/Agent/AGApproval.m $S/Agent/AGGuardrails.m $S/Agent/AGPathJail.m $S/Storage/AGConversationStore.m $S/Model/AGMessage.m $S/Model/AGConversation.m \
+             -include "$HERE/support/dispatch_shim.h" -include "$HERE/support/cf_shim.h" -lpthread
 
 # HTTPS client against local HTTP/HTTPS servers
 mkdir -p /tmp/ag_tls && ( cd /tmp/ag_tls && openssl req -x509 -newkey rsa:2048 -nodes -keyout key.pem -out cert.pem -days 2 \
