@@ -36,6 +36,44 @@ The guardrails are the only barrier.
    header would travel with them); `Settings > Agent > Allow insecure TLS` is an explicit,
    off-by-default escape hatch.
 
+## Kernel sandbox for commands (unreleased)
+
+Every command the agent starts (`make`, `clang`, `python3`, `rm` ...) runs inside a Seatbelt
+sandbox that the kernel enforces, not just the guardrails. `AGSandbox` builds the profile and the
+child applies it with `sandbox_init()` right before `execve()`; it is inherited by everything the
+command starts, cannot be loosened afterwards and needs no root.
+
+What it enforces (measured on iOS 6.1.3, iPhone 4s, with `Tools/sandbox-probe`):
+
+- **Writes** only inside the workspace (and `/dev/null`). Everything else, including your other
+  files in `/var/mobile`, is refused even if a Makefile or script tries.
+- **Reads** of `/var/mobile` are refused except the workspace, the Theos folder and the folders in
+  `agent_sandbox_read_dirs`. SMS, contacts, other apps' data and this app's own preferences (the API key)
+  are therefore unreadable to commands.
+- **No network** for the command (the app itself still talks to the model) and no Mach service lookups
+  (no launchd, SpringBoard, ...). `agent_sandbox_deny_network` / `agent_sandbox_deny_mach` = NO turn these
+  off if a tool needs them.
+- Descriptors other than 0-2 are closed in the child, so it cannot reuse the app's sockets or files.
+- `rm` is allowed (behind the confirmation prompt) **only while the sandbox is active**. It refuses the
+  workspace itself, its parents and the Theos folder.
+
+Before it is used, the app proves once per profile that the kernel really enforces it (a child applies
+it and must be refused when it creates a file in the home folder). If that fails, or `sandbox_init` is
+missing, commands run as before under the guardrails alone, a note says so, and `rm` is refused.
+Switch it off with `agent_sandbox` = NO.
+
+**What the kernel sandbox does NOT do (measured):**
+
+- Signals, `ptrace` and `kill` against other processes of the same user are **not** blocked. A hostile
+  program could attach to this app or SpringBoard. This is why the confirmation prompts for
+  `make`/`python`/`rm` stay, and why the sandbox does not replace them.
+- `process-exec` rules are ignored by this kernel, so setuid-root helpers on the device (`su`, `sudo`,
+  `cycript`, `cynject`, `launchctl_wrapper`, ...) can still be started. They stay inside the sandbox for
+  files/network and cannot reach launchd (no Mach lookups), but change the default root password and
+  remove setuid helpers you do not use.
+- `/var/tmp` is always readable and writable; do not keep secrets there.
+- A kernel exploit beats all of it; iOS 6 has many.
+
 ## What this does NOT protect against
 
 - **`make`, `clang`, `ld`, `sed`, `awk` are programming languages.** A Makefile the model writes
@@ -58,7 +96,8 @@ The guardrails are the only barrier.
 ## Ideas for the next hardening step
 
 - A confirmation dialog for destructive commands (`mv` over existing files, large `cp`).
-- Run builds as a separate low-privilege user (needs a helper binary and a setuid step).
+- Run builds as a separate low-privilege user (needs a helper binary and a setuid step). Together with the
+  kernel sandbox this would also close the ptrace/signal gap.
 - Keychain storage for the API key.
 
 
@@ -92,6 +131,10 @@ the switch is on. What it protects and what it does not:
   approval questions: `make`, `python` and deleting files are asked on the phone only. A device that can chat can
   still make the agent read, write and edit files inside the workspace, which needs no question; turn Web Access off
   if you do not want that.
+- **DNS rebinding:** a web page on another site could try to make its own name resolve to the phone and then talk
+  to it from your browser. The server therefore only answers requests whose `Host` is an IP address,
+  `localhost`, a `*.local` name or a name listed in the `agent_web_allowed_hosts` default (for example a router
+  name such as `phone.lan`); open the page by the phone's IP address.
 - **Not protected:** the traffic is plain HTTP, so anyone on the same network can read it and could copy a token
   from it (a hotspot you share is such a network). There is no TLS because a self-signed certificate would give every
   browser a warning and old TV browsers refuse it. Use it at home on your own Wi-Fi. Do not forward the port to the

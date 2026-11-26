@@ -19,6 +19,7 @@ static NSString * const AGDefaultTheosDir = @"/var/mobile/theos";
 		@"dpkg-deb", @"dpkg-query", @"dpkg-split", @"redeb",
 		@"ldid", @"codesign_allocate", @"class-dump", @"classdump-dyld", @"machocheck",
 		@"echo", @"cat", @"ls", @"cp", @"mv", @"mkdir", @"touch", @"ln",
+		@"rm",   // only runs inside the kernel sandbox (AGSandbox) and behind a confirmation prompt
 		@"grep", @"egrep", @"fgrep", @"find", @"sed", @"awk", @"gawk", @"tar", @"zip", @"unzip",
 		@"7z", @"7za", @"gzip", @"gunzip", @"bzip2", @"xz", @"diff", @"patch", @"date", @"uname",
 		@"basename", @"dirname", @"head", @"tail", @"wc", @"sort", @"uniq", @"stat", nil];
@@ -274,7 +275,7 @@ static BOOL AGRegexMatches(NSString *pattern, NSString *text) {
 	}
 
 	// Which commands write to which argument positions (protects Theos internals).
-	NSSet *writesAll = [NSSet setWithObjects:@"mv", @"mkdir", @"touch", nil];
+	NSSet *writesAll = [NSSet setWithObjects:@"mv", @"mkdir", @"touch", @"rm", nil];
 	BOOL writesLast = [bin isEqualToString:@"cp"] || [bin isEqualToString:@"ln"];
 
 	NSUInteger lastNonOption = NSNotFound;

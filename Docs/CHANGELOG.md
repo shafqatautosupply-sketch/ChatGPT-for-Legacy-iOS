@@ -1,6 +1,13 @@
 # Changelog
 
 ## Unreleased
+- **Kernel sandbox for commands (Seatbelt).** Every command runs with writes limited to the workspace, no reads
+  of `/var/mobile` outside the workspace/Theos, no network and no Mach lookups; descriptors above 2 are closed.
+  The app first proves the kernel enforces the profile. `rm` is now on the default allowed list, behind the
+  confirmation prompt, and only works while the sandbox is active (it refuses the workspace itself and its
+  parents). If you saved your own Allowed Binaries list, add `rm` there. New `agent_sandbox*` defaults and
+  `Tools/sandbox-probe` (device check). Not covered: signals/ptrace between your own processes and exec policy
+  (the kernel ignores those rules). See Docs/SECURITY.md.
 - **Web Access.** Settings > Other devices > Web Access starts a small HTTP server (port 8080 by default) that serves
   a responsive chat page (`Resources/agentic-web.html`, one file, no external resources) to any browser on the
   same network: phone, tablet, laptop, Android TV (D-pad friendly, dark/light, 17-20 px text on big screens).
@@ -15,12 +22,14 @@
   - **Prompts stay on the phone.** The page cannot answer approval questions (`make`, `python`, deleting files)
     and has no endpoint for settings, keys or guardrails. While one waits, the page only says "Waiting for your
     approval on the phone: <title>"; the command and file contents are never sent to it.
+  - **Host header allow-list** (DNS rebinding): only IP addresses, `localhost`, `*.local` and names in the
+    `agent_web_allowed_hosts` default are answered; anything else gets 403.
   - Host suite `WebAccessTests.m` (84 checks, real sockets on localhost): request parsing limits, pairing rules,
     API auth, cross-site refusal, long polling, approvals never exposed.
 - **`deleteFile` tool.** Moves a file or folder to `<workspace>/.agent-trash/<timestamp>/` (log in `log.txt`,
   restore with `mv`); nothing is ever deleted for good. Refuses the workspace, the Theos folder and their
   parents, Theos read-only dirs, `.git` and the trash; a symlink is moved itself and its target is never
-  touched; folders need `recursive=true`. `rm` stays off the allowed list.
+  touched; folders need `recursive=true`. (`rm` is allowed only inside the kernel sandbox, see above.)
 - **Confirmation prompts** for `make`, `python`, `python3` (`python` and `python3` are new on the default allowed list; if you saved your own Allowed Binaries list, add them there: the list is sent to the model in the `runShellCommand` description, and the prompt applies whatever the list says) and for deletes:
   Deny / Allow once / Allow for this task (forgotten when the next task starts or Stop is tapped). The prompt
   shows the command, the folder and the first lines of the script or Makefile. No answer in 10 minutes = denied;

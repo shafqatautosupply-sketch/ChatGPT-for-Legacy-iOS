@@ -151,7 +151,7 @@ int main(){ @autoreleasepool {
   CHECK("a file inside .git", [D(@"proj/.git/HEAD", NO) rangeOfString:@"protected"].location!=NSNotFound);
   CHECK("the trash folder and what is in it", [D(@".agent-trash", YES) rangeOfString:@"protected"].location!=NSNotFound && [D([@".agent-trash/" stringByAppendingString:batch], YES) rangeOfString:@"protected"].location!=NSNotFound);
   CHECK("none of the refusals bothered the user with a prompt", g_asked==before);
-  CHECK("rm itself is still not an allowed command", [R(@"rm -rf proj") rangeOfString:@"not in the allowed"].location!=NSNotFound && Exists(@"/tmp/agws/ws/proj"));
+  CHECK("rm is refused when the kernel sandbox is not active (host has none), and nothing is deleted", [R(@"rm -rf proj") rangeOfString:@"only available while the kernel sandbox is active"].location!=NSNotFound && Exists(@"/tmp/agws/ws/proj"));
 
   printf("=== deleteFile: symlinks, Theos, switches ===\n");
   o = D(@"inlink", NO);

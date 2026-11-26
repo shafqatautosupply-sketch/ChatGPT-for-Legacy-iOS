@@ -77,7 +77,7 @@ static NSString *g_pendingTitle = nil;   // guarded by @synchronized([AGApproval
 #pragma mark - Which commands are gated
 
 + (NSSet *)gatedBinaries {
-	NSMutableSet *set = [NSMutableSet setWithObjects:@"make", @"python", @"python2", @"python2.7", @"python3", nil];
+	NSMutableSet *set = [NSMutableSet setWithObjects:@"make", @"python", @"python2", @"python2.7", @"python3", @"rm", nil];
 	id extra = [[NSUserDefaults standardUserDefaults] objectForKey:@"agent_confirm_binaries"];
 	if ([extra isKindOfClass:[NSArray class]]) {
 		for (id name in extra) if ([name isKindOfClass:[NSString class]] && [name length] > 0) [set addObject:name];

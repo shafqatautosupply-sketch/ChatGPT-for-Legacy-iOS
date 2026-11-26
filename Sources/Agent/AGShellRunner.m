@@ -2,6 +2,7 @@
 #import "AGGuardrails.h"
 #import "AGPathJail.h"
 #import "AGApproval.h"
+#import "AGSandbox.h"
 
 #include <unistd.h>
 #include <fcntl.h>
@@ -274,6 +275,7 @@ static void AGFreeCStringArray(char **array) {
                        argv:(NSArray *)argv
                         cwd:(NSString *)cwd
                         env:(NSArray *)env
+            sandboxProfile:(NSString *)sandboxProfile
                     timeout:(NSTimeInterval)timeout
                 isCancelled:(BOOL (^)(void))cancelled
                    exitCode:(int *)exitCodeOut {
@@ -288,6 +290,22 @@ static void AGFreeCStringArray(char **array) {
 	char **cArgv = AGCStringArray(argv);
 	char **cEnv = AGCStringArray(env);
 
+	// Sandbox: the function pointer and the profile text are prepared here, not in the child.
+	char *cProfile = NULL;
+	AGSandboxInitFn sandboxInit = NULL;
+	if (sandboxProfile != nil) {
+		sandboxInit = [AGSandbox initFunction];
+		if (sandboxInit == NULL) {
+			close(pipeFds[0]); close(pipeFds[1]); if (devNull >= 0) close(devNull);
+			free(cPath); free(cCwd); AGFreeCStringArray(cArgv); AGFreeCStringArray(cEnv);
+			*exitCodeOut = AGSandboxFailExit;
+			return @"[GUARDRAIL] The sandbox could not be applied; the command was not run.";
+		}
+		cProfile = strdup([sandboxProfile UTF8String]);
+	}
+	int maxFd = getdtablesize();
+	if (maxFd > 4096) maxFd = 4096;
+
 	pid_t pid = fork();
 	if (pid == 0) {
 		setpgid(0, 0);
@@ -295,16 +313,19 @@ static void AGFreeCStringArray(char **array) {
 		if (devNull >= 0) dup2(devNull, 0);
 		dup2(pipeFds[1], 1);
 		dup2(pipeFds[1], 2);
-		close(pipeFds[0]);
-		if (pipeFds[1] > 2) close(pipeFds[1]);
-		if (devNull > 2) close(devNull);
+		// Do not hand the app's other descriptors (sockets, open files) to the command.
+		for (int fd = 3; fd < maxFd; fd++) close(fd);
+		if (cProfile != NULL) {
+			char *sandboxError = NULL;
+			if (sandboxInit(cProfile, 0, &sandboxError) != 0) _exit(AGSandboxFailExit);
+		}
 		execve(cPath, cArgv, cEnv);
 		_exit(127);
 	}
 
 	close(pipeFds[1]);
 	if (devNull >= 0) close(devNull);
-	free(cPath); free(cCwd); AGFreeCStringArray(cArgv); AGFreeCStringArray(cEnv);
+	free(cPath); free(cCwd); free(cProfile); AGFreeCStringArray(cArgv); AGFreeCStringArray(cEnv);
 
 	if (pid < 0) { close(pipeFds[0]); *exitCodeOut = 127; return @"Error: could not start process."; }
 	setpgid(pid, pid); // also from the parent, to close the race with the child
@@ -390,7 +411,29 @@ static void AGFreeCStringArray(char **array) {
 	if (timedOut) [result appendFormat:@"\n[timed out after %.0fs; process killed]", timeout];
 	if (wasCancelled) [result appendString:@"\n[cancelled]"];
 	if (signalNote != nil && !timedOut && !wasCancelled) [result appendFormat:@"\n[%@]", signalNote];
+	if (sandboxProfile != nil && code == AGSandboxFailExit) [result appendString:@"\n[GUARDRAIL] The sandbox could not be applied; the command was not run."];
 	return result;
+}
+
+#pragma mark - rm
+
+/// `rm` is only offered inside the sandbox. This refuses the cases the sandbox cannot see:
+/// removing the workspace itself, a folder that contains it, or the Theos directory.
++ (NSString *)rmProblemForArgv:(NSArray *)argv cwd:(NSString *)cwd workspace:(NSString *)workspace {
+	NSString *theos = [AGPathJail canonicalPath:[AGGuardrails theosDirectory] relativeTo:@"/"];
+	BOOL afterDashDash = NO;
+	for (NSUInteger i = 1; i < [argv count]; i++) {
+		NSString *arg = [argv objectAtIndex:i];
+		if (!afterDashDash && [arg isEqualToString:@"--"]) { afterDashDash = YES; continue; }
+		if (!afterDashDash && [arg hasPrefix:@"-"]) continue;
+		NSString *canonical = [AGPathJail canonicalPath:arg relativeTo:cwd];
+		if (canonical == nil) return @"[GUARDRAIL TRIGGERED] rm: cannot resolve that path.";
+		if ([canonical isEqualToString:workspace] || [workspace hasPrefix:[canonical stringByAppendingString:@"/"]] ||
+			(theos != nil && [canonical isEqualToString:theos])) {
+			return @"[GUARDRAIL TRIGGERED] rm must not remove the workspace itself, a folder that contains it, or the Theos directory. Remove the files inside it instead.";
+		}
+	}
+	return nil;
 }
 
 #pragma mark - Public entry point
@@ -406,6 +449,12 @@ static void AGFreeCStringArray(char **array) {
 	NSString *cwd = [AGGuardrails authorizePath:workspace relativeTo:@"/" forWrite:NO reason:&reason];
 	if (cwd == nil) return [NSString stringWithFormat:@"[GUARDRAIL] Workspace is not usable: %@", reason];
 	[[NSFileManager defaultManager] createDirectoryAtPath:cwd withIntermediateDirectories:YES attributes:nil error:nil];
+
+	// Kernel sandbox (Seatbelt). If it cannot be applied the commands still run as before,
+	// under the guardrails only, and `rm` is refused.
+	NSString *sandboxProfile = nil, *sandboxReason = nil;
+	BOOL sandboxed = [AGSandbox prepareForWorkspace:cwd profile:&sandboxProfile reason:&sandboxReason];
+	NSString *workspaceRoot = [[cwd copy] autorelease];
 
 	NSArray *env = [self environmentForWorkspace:workspace];
 	id timeoutValue = [[NSUserDefaults standardUserDefaults] objectForKey:@"agent_command_timeout"];
@@ -455,6 +504,13 @@ static void AGFreeCStringArray(char **array) {
 		if (![allowed containsObject:bin]) {
 			return [NSString stringWithFormat:@"[GUARDRAIL TRIGGERED] BLOCKED (Guardrails): Command '%@' is not in the allowed execution whitelist.", bin];
 		}
+		if ([bin isEqualToString:@"rm"]) {
+			if (!sandboxed) {
+				return [NSString stringWithFormat:@"[GUARDRAIL TRIGGERED] 'rm' is only available while the kernel sandbox is active (%@) Use the deleteFile tool instead.", (sandboxReason != nil) ? sandboxReason : @"it is not."];
+			}
+			NSString *rmProblem = [self rmProblemForArgv:argv cwd:cwd workspace:workspaceRoot];
+			if (rmProblem != nil) return rmProblem;
+		}
 		NSString *binaryPath = [AGGuardrails resolveBinary:bin];
 		if (binaryPath == nil) {
 			return [NSString stringWithFormat:@"[GUARDRAIL TRIGGERED] '%@' is allowed but was not found in: %@", bin, [[AGGuardrails execSearchPath] componentsJoinedByString:@":"]];
@@ -481,7 +537,7 @@ static void AGFreeCStringArray(char **array) {
 			[output appendFormat:@"$ %@\n", shown];
 		}
 		int exitCode = 0;
-		NSString *text = [self executeBinary:binaryPath argv:argv cwd:cwd env:env timeout:timeout isCancelled:cancelled exitCode:&exitCode];
+		NSString *text = [self executeBinary:binaryPath argv:argv cwd:cwd env:env sandboxProfile:sandboxProfile timeout:timeout isCancelled:cancelled exitCode:&exitCode];
 		[output appendString:text];
 		if ([text length] > 0 && ![text hasSuffix:@"\n"]) [output appendString:@"\n"];
 		if (exitCode != 0) {
@@ -490,6 +546,9 @@ static void AGFreeCStringArray(char **array) {
 		}
 	}
 
+	if (!sandboxed && sandboxReason != nil && [AGSandbox isExpected] && [output length] > 0) {
+		[output appendFormat:@"\n[note: ran WITHOUT the kernel sandbox: %@]", sandboxReason];
+	}
 	NSString *final = [output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
 	return ([final length] > 0) ? final : @"(no output, exit code 0)";
 }

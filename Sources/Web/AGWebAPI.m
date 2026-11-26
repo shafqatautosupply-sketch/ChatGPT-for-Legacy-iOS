@@ -119,11 +119,56 @@ static BOOL AGSafeIdentifier(NSString *identifier) {
 	return entry;
 }
 
+#pragma mark - Host header (DNS rebinding)
+
+/// A web page on another site can only talk to this server "as itself" if its own name is made to
+/// resolve to the phone (DNS rebinding); the browser then sends THAT name in Host. So only names
+/// that cannot be the attacker's are accepted: IP addresses, localhost, *.local, and names the user
+/// listed in the `agent_web_allowed_hosts` default (for example a router name such as "phone.lan").
++ (BOOL)isAcceptableHost:(NSString *)hostHeader {
+	NSString *host = [hostHeader lowercaseString];
+	if ([host length] == 0 || [host length] > 255) return NO;
+	NSString *name = host;
+	if ([host hasPrefix:@"["]) {                       // [ipv6] or [ipv6]:port
+		NSRange close = [host rangeOfString:@"]"];
+		if (close.location == NSNotFound) return NO;
+		NSString *inside = [host substringWithRange:NSMakeRange(1, close.location - 1)];
+		NSCharacterSet *allowed = [NSCharacterSet characterSetWithCharactersInString:@"0123456789abcdef:.%"];
+		return [inside length] > 0 && [inside rangeOfCharacterFromSet:[allowed invertedSet]].location == NSNotFound;
+	}
+	NSRange colon = [host rangeOfString:@":" options:NSBackwardsSearch];
+	if (colon.location != NSNotFound) {
+		NSString *port = [host substringFromIndex:colon.location + 1];
+		NSCharacterSet *digits = [NSCharacterSet decimalDigitCharacterSet];
+		if ([port length] == 0 || [port length] > 5 || [port rangeOfCharacterFromSet:[digits invertedSet]].location != NSNotFound) return NO;
+		name = [host substringToIndex:colon.location];
+	}
+	if ([name length] == 0) return NO;
+	if ([name isEqualToString:@"localhost"] || [name hasSuffix:@".local"]) return YES;
+	NSArray *parts = [name componentsSeparatedByString:@"."];
+	if ([parts count] == 4) {                          // dotted IPv4
+		BOOL numeric = YES;
+		for (NSString *part in parts) {
+			if ([part length] == 0 || [part length] > 3 || [part rangeOfCharacterFromSet:[[NSCharacterSet decimalDigitCharacterSet] invertedSet]].location != NSNotFound || [part intValue] > 255) { numeric = NO; break; }
+		}
+		if (numeric) return YES;
+	}
+	id extra = [[NSUserDefaults standardUserDefaults] objectForKey:@"agent_web_allowed_hosts"];
+	if ([extra isKindOfClass:[NSArray class]]) {
+		for (id entry in extra) if ([entry isKindOfClass:[NSString class]] && [[entry lowercaseString] isEqualToString:name]) return YES;
+	}
+	return NO;
+}
+
 #pragma mark - Routing
 
 - (AGHTTPResponse *)handleRequest:(AGHTTPRequest *)request {
 	NSString *path = request.path;
 	NSString *method = request.method;
+
+	if (![AGWebAPI isAcceptableHost:[request headerNamed:@"host"]]) {
+		return AGError(403, @"Open this page by the phone's IP address (for example http://192.168.1.20:8080).");
+	}
 
 	if ([path isEqualToString:@"/"] || [path isEqualToString:@"/index.html"]) {
 		if (![method isEqualToString:@"GET"] && ![method isEqualToString:@"HEAD"]) return AGError(405, @"Method not allowed");

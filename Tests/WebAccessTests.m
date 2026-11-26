@@ -294,6 +294,20 @@ int main(int argc, char **argv) {
 		CHECK("cross-site POST is refused", StatusOf(Post(wp, @"/api/send", @"{\"text\":\"x\"}", [auth stringByAppendingString:@"Origin: http://evil.example\r\n"])) == 403
 			&& StatusOf(Post(wp, @"/api/pair", @"{}", @"Origin: http://evil.example\r\n")) == 403);
 		CHECK("same-origin POST is accepted", StatusOf(Post(wp, @"/api/stop", @"{}", [auth stringByAppendingString:@"Origin: http://127.0.0.1\r\n"])) == 403 ? NO : YES);
+		// DNS rebinding: a name chosen by another site's DNS must never be accepted as Host
+		CHECK("a foreign Host name is refused (page, pairing, API)",
+			StatusOf(Raw(wp, @"GET / HTTP/1.1\r\nHost: attacker.example:8080\r\n\r\n")) == 403
+			&& StatusOf(Raw(wp, @"POST /api/pair HTTP/1.1\r\nHost: attacker.example\r\nOrigin: http://attacker.example\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}")) == 403
+			&& StatusOf(Raw(wp, [NSString stringWithFormat:@"GET /api/state HTTP/1.1\r\nHost: attacker.example\r\n%@\r\n", auth])) == 403);
+		CHECK("IP addresses, localhost and .local names are accepted",
+			[AGWebAPI isAcceptableHost:@"192.168.1.20:8080"] && [AGWebAPI isAcceptableHost:@"127.0.0.1"] && [AGWebAPI isAcceptableHost:@"[::1]:8080"]
+			&& [AGWebAPI isAcceptableHost:@"localhost:8080"] && [AGWebAPI isAcceptableHost:@"My-iPhone.local"]);
+		CHECK("lookalikes and junk are refused",
+			![AGWebAPI isAcceptableHost:@"192.168.1.20.evil.example"] && ![AGWebAPI isAcceptableHost:@"999.1.1.1x"] && ![AGWebAPI isAcceptableHost:@""]
+			&& ![AGWebAPI isAcceptableHost:@"evil.example:80x"] && ![AGWebAPI isAcceptableHost:@"localhost.evil.example"] && ![AGWebAPI isAcceptableHost:@"[evil]"]);
+		[[NSUserDefaults standardUserDefaults] setObject:[NSArray arrayWithObject:@"Phone.LAN"] forKey:@"agent_web_allowed_hosts"];
+		CHECK("a name the user listed is accepted", [AGWebAPI isAcceptableHost:@"phone.lan:8080"] && ![AGWebAPI isAcceptableHost:@"other.lan"]);
+		[[NSUserDefaults standardUserDefaults] removeObjectForKey:@"agent_web_allowed_hosts"];
 		CHECK("no CORS headers are ever sent", [Get(wp, @"/", @"Origin: http://evil.example\r\n") rangeOfString:@"Access-Control"].location == NSNotFound);
 
 		// long polling

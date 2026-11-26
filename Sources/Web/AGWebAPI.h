@@ -42,4 +42,7 @@
 /// JSON for one message. `displayText` is the cleaned text from the renderer.
 + (NSDictionary *)dictionaryForMessage:(AGMessage *)message index:(NSUInteger)index displayText:(NSString *)displayText;
 
+/// Host header allow-list against DNS rebinding (IP addresses, localhost, *.local, `agent_web_allowed_hosts`).
++ (BOOL)isAcceptableHost:(NSString *)hostHeader;
+
 @end
