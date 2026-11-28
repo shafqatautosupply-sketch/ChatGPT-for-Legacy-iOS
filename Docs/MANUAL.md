@@ -20,7 +20,7 @@ The key is saved in the app's preferences on the device (not the keychain) and i
 configured API host (as `x-goog-api-key` for Gemini, as a Bearer token for OpenAI-compatible servers), over HTTPS
 with certificate verification. `http://` URLs (fine for a server on your own network) send it unencrypted.
 
-## 2. Modes (Settings > Mode)
+## 2. Modes (Settings > Agent and Chat)
 - **Agent Mode**: the model can use tools in your workspace folder: run commands, read, write and edit files.
 - **Pure chat**: Agent Mode off. Plain conversation; earlier tool exchanges are shown but not replayed.
 - **Terminal Mode**: green-on-black console look.
@@ -38,7 +38,7 @@ Tools: `runShellCommand`, `readFile` (line ranges, tells you where to continue),
 **Agent Guardrails & Workspace**
 - *Workspace Directory*: the folder the agent works in (default `Documents/SandBox`). Its parent folders
   and everything outside it, except the Theos directory, are off limits.
-- *Minimum seconds between requests*: pause between model calls (default 5 s, helps with free-tier limits).
+- *Request gap (sec)*: pause between model calls (default 5 s, helps with free-tier limits).
 - *Command timeout*: a command running longer is killed (default 120 s).
 - *Max agent steps*: model requests per task before it stops (default 40).
 - *Allow insecure TLS*: off by default. See `SECURITY.md` before turning it on.

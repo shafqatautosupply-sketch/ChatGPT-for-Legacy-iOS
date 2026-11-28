@@ -1,6 +1,7 @@
 #import "AGWebAccessViewController.h"
 #import "AGWebAccess.h"
 #import "AGWebPairing.h"
+#import "AGInfoCell.h"
 
 enum { AGSectionSwitch = 0, AGSectionAddress, AGSectionDevices, AGSectionCount };
 static const NSInteger AGTagPortAlert = 1;
@@ -59,17 +60,28 @@ static const NSInteger AGTagDisconnectAllAlert = 2;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-	if (section == AGSectionSwitch) {
-		return @"Shows a chat page that any browser on the same Wi-Fi can open (Android TV, tablet, laptop). A device must be allowed here first: a message appears on this phone and nothing happens until you tap Allow. There is no password. Questions about make, python and deleting files are asked on this phone, never on the web page. The connection is plain HTTP, so only use it on a network you trust.";
-	}
-	if (section == AGSectionAddress && [AGWebAccess isEnabled]) return @"To keep the page answering while the app is not on screen, leave \"Keep running in background\" on (Agent Guardrails & Workspace). To see the Allow question over other apps, leave \"Ask over other apps\" on there too.";
 	if (section == AGSectionDevices && [self.devices count] == 0) return @"No device has been allowed yet.";
 	return nil;
 }
 
+/// What the (i) on a row says (nil = no button).
+- (NSString *)infoForRow:(NSIndexPath *)indexPath {
+	if (indexPath.section == AGSectionSwitch) {
+		return @"Shows a chat page that any browser on the same Wi-Fi can open (Android TV, tablet, laptop).\n\nA device must be allowed first: a message appears on this phone and nothing happens until you tap Allow. There is no password.\n\nQuestions about make, python and deleting files are asked on this phone, never on the web page.\n\nThe connection is plain HTTP, so only use it on a network you trust.";
+	}
+	if (indexPath.section == AGSectionAddress) {
+		NSInteger addressRows = (NSInteger)MAX([[AGWebAccess addressURLs] count], (NSUInteger)1);
+		if (indexPath.row >= addressRows) {
+			return @"To keep the page answering while the app is not on screen, leave \"Keep running in background\" on (Agent Guardrails & Workspace). To see the Allow question over other apps, leave \"Ask over other apps\" on there too.";
+		}
+	}
+	return nil;
+}
+
 - (UITableViewCell *)plainCell:(UITableView *)tableView style:(UITableViewCellStyle)style identifier:(NSString *)identifier {
-	UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:identifier];
-	if (cell == nil) cell = [[[UITableViewCell alloc] initWithStyle:style reuseIdentifier:identifier] autorelease];
+	AGInfoCell *cell = (AGInfoCell *)[tableView dequeueReusableCellWithIdentifier:identifier];
+	if (cell == nil) cell = [[[AGInfoCell alloc] initWithStyle:style reuseIdentifier:identifier] autorelease];
+	cell.infoText = nil;
 	cell.accessoryType = UITableViewCellAccessoryNone;
 	cell.accessoryView = nil;
 	cell.selectionStyle = UITableViewCellSelectionStyleNone;
@@ -84,6 +96,7 @@ static const NSInteger AGTagDisconnectAllAlert = 2;
 	if (indexPath.section == AGSectionSwitch) {
 		UITableViewCell *cell = [self plainCell:tableView style:UITableViewCellStyleSubtitle identifier:@"WebSwitch"];
 		cell.textLabel.text = @"Web Access";
+		((AGInfoCell *)cell).infoText = [self infoForRow:indexPath];
 		UISwitch *toggle = [[[UISwitch alloc] initWithFrame:CGRectZero] autorelease];
 		toggle.on = [AGWebAccess isEnabled];
 		[toggle addTarget:self action:@selector(switchChanged:) forControlEvents:UIControlEventValueChanged];
@@ -112,6 +125,7 @@ static const NSInteger AGTagDisconnectAllAlert = 2;
 		}
 		UITableViewCell *cell = [self plainCell:tableView style:UITableViewCellStyleValue1 identifier:@"WebPort"];
 		cell.textLabel.text = @"Port";
+		((AGInfoCell *)cell).infoText = [self infoForRow:indexPath];
 		cell.textLabel.font = [UIFont boldSystemFontOfSize:17.0f];
 		cell.detailTextLabel.text = [NSString stringWithFormat:@"%lu", (unsigned long)[AGWebAccess port]];
 		cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;

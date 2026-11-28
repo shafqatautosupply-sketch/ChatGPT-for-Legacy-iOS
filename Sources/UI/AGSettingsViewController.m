@@ -10,6 +10,60 @@
 #import "AGChatClient.h"
 #import "AGWebAccess.h"
 #import "AGWebAccessViewController.h"
+#import "AGInfoCell.h"
+
+// Every row on this screen, so sections can be rearranged by editing one table.
+typedef enum {
+	AGRowModelConfigs, AGRowSystemPrompt, AGRowThinking,
+	AGRowAgentMode, AGRowAgentGuardrails,
+	AGRowTerminalMode, AGRowMarkdown, AGRowChatLimits,
+	AGRowTokenSaver, AGRowUsage,
+	AGRowWebSwitch, AGRowWebDevices,
+	AGRowRawJSON, AGRowAbout
+} AGSettingsRow;
+
+static NSArray *AGSettingsLayout(void) {
+	static NSArray *layout = nil;
+	if (layout == nil) {
+		#define SEC(t, ...) [NSDictionary dictionaryWithObjectsAndKeys:t, @"title", [NSArray arrayWithObjects:__VA_ARGS__, nil], @"rows", nil]
+		#define ROW(r) [NSNumber numberWithInt:r]
+		layout = [[NSArray alloc] initWithObjects:
+			SEC(@"Model",          ROW(AGRowModelConfigs), ROW(AGRowSystemPrompt), ROW(AGRowThinking)),
+			SEC(@"Agent",          ROW(AGRowAgentMode), ROW(AGRowAgentGuardrails)),
+			SEC(@"Chat",           ROW(AGRowTerminalMode), ROW(AGRowMarkdown), ROW(AGRowChatLimits)),
+			SEC(@"Token usage",    ROW(AGRowTokenSaver), ROW(AGRowUsage)),
+			SEC(@"Other devices",  ROW(AGRowWebSwitch), ROW(AGRowWebDevices)),
+			SEC(@"Advanced",       ROW(AGRowRawJSON), ROW(AGRowAbout)),
+			nil];
+		#undef SEC
+		#undef ROW
+	}
+	return layout;
+}
+
+static AGSettingsRow AGRowAt(NSIndexPath *indexPath) {
+	NSArray *rows = [[AGSettingsLayout() objectAtIndex:(NSUInteger)indexPath.section] objectForKey:@"rows"];
+	return (AGSettingsRow)[[rows objectAtIndex:(NSUInteger)indexPath.row] intValue];
+}
+
+static NSString *AGInfoForRow(AGSettingsRow row) {
+	switch (row) {
+		case AGRowThinking:
+			return @"How much a Gemini 3 or newer model reasons before it answers (Agent Mode).\n\nAuto uses Medium on Flash-Lite models, which stop too early at their minimal default, and the model's own default on the others. Higher is slower and costs more.\n\nGemini 2.5 and OpenAI-compatible profiles ignore it.";
+		case AGRowAgentMode:
+			return @"Turns on the local workspace tools and shell command execution.";
+		case AGRowTerminalMode:
+			return @"Switches the chat screen to a terminal console view.";
+		case AGRowMarkdown:
+			return @"Shows rich formatting (headers, bold, code blocks) in chat bubbles.";
+		case AGRowTokenSaver:
+			return @"Shrinks old tool output and drops old turns from what is sent to the model. Your saved chat is never changed.\n\nThe budget is set under Chat History Limits.";
+		case AGRowWebSwitch:
+			return @"Shows a chat page on your Wi-Fi that another device (Android TV, tablet, laptop) can open.\n\nEach device has to be allowed on this phone first. There is no password.";
+		default:
+			return nil;
+	}
+}
 
 @implementation AGSettingsViewController
 
@@ -19,10 +73,6 @@
 		self.title = @"Settings";
 	}
 	return self;
-}
-
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-	return 4;
 }
 
 - (void)viewDidLoad {
@@ -37,177 +87,102 @@
 	[self.tableView reloadData];
 }
 
+#pragma mark - Table
+
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
+	return (NSInteger)[AGSettingsLayout() count];
+}
+
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-	if (section == 0) return 3;
-	if (section == 1) return 3;
-	if (section == 3) return 2;
-	return 6;
+	return (NSInteger)[[[AGSettingsLayout() objectAtIndex:(NSUInteger)section] objectForKey:@"rows"] count];
 }
+
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
-	if (section == 0) return @"Model";
-	if (section == 1) return @"Mode";
-	if (section == 3) return @"Other devices";
-	return @"Agent & Debugging";
+	return [[AGSettingsLayout() objectAtIndex:(NSUInteger)section] objectForKey:@"title"];
 }
-- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-	if (section == 0) {
-		return @"Manage providers and the optional system prompt sent before each request. Thinking is how much a Gemini 3 or newer model reasons before it answers (Agent Mode). Auto uses Medium on Flash-Lite models, which stop too early at their minimal default, and the model's own default on the others. Higher is slower and costs more. Gemini 2.5 and OpenAI-compatible profiles ignore it.";
-	} else if (section == 3) {
-		return @"Web Access shows a chat page on your Wi-Fi for another device (Android TV, tablet, laptop). Each device has to be allowed on this phone first. No password.";
-	} else if (section == 1) {
-		return @"Agent Mode enables local workspace tools and shell command execution. Terminal Mode switches the chat interface to a terminal console view. Markdown Logic enables rich formatting (headers, bold, code blocks) in chat bubbles.";
+
+/// A cell with a title, an optional (i) button and either a switch, a value or a chevron.
+- (AGInfoCell *)cellWithStyle:(UITableViewCellStyle)style row:(AGSettingsRow)row tableView:(UITableView *)tableView {
+	NSString *identifier = [NSString stringWithFormat:@"Row%d-%d", (int)row, (int)style];
+	AGInfoCell *cell = (AGInfoCell *)[tableView dequeueReusableCellWithIdentifier:identifier];
+	if (cell == nil) {
+		cell = [[[AGInfoCell alloc] initWithStyle:style reuseIdentifier:identifier] autorelease];
 	}
-	return @"Token Saver shrinks old tool output and drops old turns from what is sent to the model (your saved chat is never changed). The usage row shows what the last request cost.";
+	cell.infoText = AGInfoForRow(row);
+	return cell;
+}
+
+- (AGInfoCell *)switchCellForRow:(AGSettingsRow)row title:(NSString *)title on:(BOOL)on action:(SEL)action tableView:(UITableView *)tableView {
+	AGInfoCell *cell = [self cellWithStyle:UITableViewCellStyleDefault row:row tableView:tableView];
+	cell.selectionStyle = UITableViewCellSelectionStyleNone;
+	cell.accessoryType = UITableViewCellAccessoryNone;
+	UISwitch *toggle = (UISwitch *)cell.accessoryView;
+	if (![toggle isKindOfClass:[UISwitch class]]) {
+		toggle = [[[UISwitch alloc] initWithFrame:CGRectZero] autorelease];
+		cell.accessoryView = toggle;
+	}
+	cell.textLabel.text = title;
+	[toggle removeTarget:nil action:NULL forControlEvents:UIControlEventValueChanged];
+	[toggle addTarget:self action:action forControlEvents:UIControlEventValueChanged];
+	toggle.on = on;
+	return cell;
+}
+
+- (AGInfoCell *)linkCellForRow:(AGSettingsRow)row title:(NSString *)title value:(NSString *)value tableView:(UITableView *)tableView {
+	AGInfoCell *cell = [self cellWithStyle:(value != nil ? UITableViewCellStyleValue1 : UITableViewCellStyleDefault) row:row tableView:tableView];
+	cell.accessoryView = nil;
+	cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+	cell.selectionStyle = UITableViewCellSelectionStyleBlue;
+	cell.textLabel.text = title;
+	cell.detailTextLabel.text = value;
+	return cell;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-	static NSString *CellIdentifier = @"SettingsCell";
-
-	if (indexPath.section == 3) {
-		if (indexPath.row == 0) {
-			static NSString *WebCellID = @"WebSwitchCell";
-			UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:WebCellID];
-			if (cell == nil) {
-				cell = [[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:WebCellID] autorelease];
-				cell.selectionStyle = UITableViewCellSelectionStyleNone;
-				cell.accessoryView = [[[UISwitch alloc] initWithFrame:CGRectZero] autorelease];
-			}
-			cell.textLabel.text = @"Web Access";
-			UISwitch *webSwitch = (UISwitch *)cell.accessoryView;
-			[webSwitch removeTarget:nil action:NULL forControlEvents:UIControlEventValueChanged];
-			[webSwitch addTarget:self action:@selector(webSwitchChanged:) forControlEvents:UIControlEventValueChanged];
-			webSwitch.on = [AGWebAccess isEnabled];
-			return cell;
-		}
-		static NSString *WebDetailID = @"WebDetailCell";
-		UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:WebDetailID];
-		if (cell == nil) {
-			cell = [[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:WebDetailID] autorelease];
-			cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-		}
-		cell.textLabel.text = @"Address & Devices";
-		cell.detailTextLabel.text = [AGWebAccess isRunning] ? [NSString stringWithFormat:@"Port %lu", (unsigned long)[AGWebAccess port]] : ([AGWebAccess lastError] != nil ? @"Error" : @"Off");
-		return cell;
-	}
-
-	if (indexPath.section == 1) {
-		if (indexPath.row == 0) {
-			static NSString *AgentCellID = @"AgentSwitchCell";
-			UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:AgentCellID];
-			if (cell == nil) {
-				cell = [[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:AgentCellID] autorelease];
-				cell.selectionStyle = UITableViewCellSelectionStyleNone;
-				UISwitch *agentSwitch = [[[UISwitch alloc] initWithFrame:CGRectZero] autorelease];
-				cell.accessoryView = agentSwitch;
-			}
-			cell.textLabel.text = @"Agent Mode";
-			UISwitch *agentSwitch = (UISwitch *)cell.accessoryView;
-			[agentSwitch removeTarget:nil action:NULL forControlEvents:UIControlEventValueChanged];
-			[agentSwitch addTarget:self action:@selector(agentSwitchChanged:) forControlEvents:UIControlEventValueChanged];
-			agentSwitch.on = [AGChatClient isAgentModeEnabled];
-			return cell;
-		} else if (indexPath.row == 1) {
-			static NSString *TerminalCellID = @"TerminalSwitchCell";
-			UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:TerminalCellID];
-			if (cell == nil) {
-				cell = [[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:TerminalCellID] autorelease];
-				cell.selectionStyle = UITableViewCellSelectionStyleNone;
-				UISwitch *terminalSwitch = [[[UISwitch alloc] initWithFrame:CGRectZero] autorelease];
-				cell.accessoryView = terminalSwitch;
-			}
-			cell.textLabel.text = @"Terminal Mode";
-			UISwitch *terminalSwitch = (UISwitch *)cell.accessoryView;
-			[terminalSwitch removeTarget:nil action:NULL forControlEvents:UIControlEventValueChanged];
-			[terminalSwitch addTarget:self action:@selector(terminalSwitchChanged:) forControlEvents:UIControlEventValueChanged];
-			terminalSwitch.on = [AGChatClient isTerminalModeEnabled];
-			return cell;
-		} else {
-			static NSString *MarkdownCellID = @"MarkdownSwitchCell";
-			UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:MarkdownCellID];
-			if (cell == nil) {
-				cell = [[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:MarkdownCellID] autorelease];
-				cell.selectionStyle = UITableViewCellSelectionStyleNone;
-				UISwitch *markdownSwitch = [[[UISwitch alloc] initWithFrame:CGRectZero] autorelease];
-				cell.accessoryView = markdownSwitch;
-			}
-			cell.textLabel.text = @"Markdown Logic";
-			UISwitch *markdownSwitch = (UISwitch *)cell.accessoryView;
-			[markdownSwitch removeTarget:nil action:NULL forControlEvents:UIControlEventValueChanged];
-			[markdownSwitch addTarget:self action:@selector(markdownSwitchChanged:) forControlEvents:UIControlEventValueChanged];
-			markdownSwitch.on = [AGChatClient isMarkdownEnabled];
-			return cell;
-		}
-	}
-
-	if (indexPath.section == 2 && indexPath.row == 2) {
-		static NSString *CompressionCellID = @"CompressionSwitchCell";
-		UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:CompressionCellID];
-		if (cell == nil) {
-			cell = [[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:CompressionCellID] autorelease];
-			cell.selectionStyle = UITableViewCellSelectionStyleNone;
-			UISwitch *compressionSwitch = [[[UISwitch alloc] initWithFrame:CGRectZero] autorelease];
-			cell.accessoryView = compressionSwitch;
-		}
-		cell.textLabel.text = @"Token Saver";
-		UISwitch *compressionSwitch = (UISwitch *)cell.accessoryView;
-		[compressionSwitch removeTarget:nil action:NULL forControlEvents:UIControlEventValueChanged];
-		[compressionSwitch addTarget:self action:@selector(compressionSwitchChanged:) forControlEvents:UIControlEventValueChanged];
-		compressionSwitch.on = [AGConversationStore isTokenSaverEnabled];
-		return cell;
-	}
-
-	if (indexPath.section == 0 && indexPath.row == 2) {
-		static NSString *ThinkingCellID = @"ThinkingCell";
-		UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:ThinkingCellID];
-		if (cell == nil) {
-			cell = [[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:ThinkingCellID] autorelease];
-			cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-		}
-		cell.textLabel.text = @"Thinking";
-		cell.detailTextLabel.text = [AGProviderConfig displayNameForThinkingLevel:[AGProviderConfig thinkingLevelSetting]];
-		return cell;
-	}
-
-	UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:CellIdentifier];
-	if (cell == nil) {
-		cell = [[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:CellIdentifier] autorelease];
-		cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-	}
-
-	if (indexPath.section == 0) {
-		if (indexPath.row == 0) {
-			cell.textLabel.text = @"Model Configurations";
-		} else {
-			cell.textLabel.text = @"System Prompt";
-		}
-	} else if (indexPath.section == 2) {
-		if (indexPath.row == 0) {
-			cell.textLabel.text = @"Agent Guardrails & Workspace";
-		} else if (indexPath.row == 1) {
-			cell.textLabel.text = @"Chat History Limits";
-		} else if (indexPath.row == 2) {
-			// Handled above as switch
-		} else if (indexPath.row == 3) {
+	AGSettingsRow row = AGRowAt(indexPath);
+	switch (row) {
+		case AGRowModelConfigs:
+			return [self linkCellForRow:row title:@"Model Configurations" value:nil tableView:tableView];
+		case AGRowSystemPrompt:
+			return [self linkCellForRow:row title:@"System Prompt" value:nil tableView:tableView];
+		case AGRowThinking:
+			return [self linkCellForRow:row title:@"Thinking" value:[AGProviderConfig displayNameForThinkingLevel:[AGProviderConfig thinkingLevelSetting]] tableView:tableView];
+		case AGRowAgentMode:
+			return [self switchCellForRow:row title:@"Agent Mode" on:[AGChatClient isAgentModeEnabled] action:@selector(agentSwitchChanged:) tableView:tableView];
+		case AGRowAgentGuardrails:
+			return [self linkCellForRow:row title:@"Guardrails & Workspace" value:nil tableView:tableView];
+		case AGRowTerminalMode:
+			return [self switchCellForRow:row title:@"Terminal Mode" on:[AGChatClient isTerminalModeEnabled] action:@selector(terminalSwitchChanged:) tableView:tableView];
+		case AGRowMarkdown:
+			return [self switchCellForRow:row title:@"Markdown Logic" on:[AGChatClient isMarkdownEnabled] action:@selector(markdownSwitchChanged:) tableView:tableView];
+		case AGRowChatLimits:
+			return [self linkCellForRow:row title:@"Chat History Limits" value:nil tableView:tableView];
+		case AGRowTokenSaver:
+			return [self switchCellForRow:row title:@"Token Saver" on:[AGConversationStore isTokenSaverEnabled] action:@selector(compressionSwitchChanged:) tableView:tableView];
+		case AGRowUsage: {
+			AGInfoCell *cell = [self cellWithStyle:UITableViewCellStyleDefault row:row tableView:tableView];
+			cell.accessoryView = nil;
 			cell.accessoryType = UITableViewCellAccessoryNone;
 			cell.selectionStyle = UITableViewCellSelectionStyleNone;
 			NSDictionary *usage = [AGChatClient lastUsage];
-			if (usage == nil) {
-				cell.textLabel.text = @"Last request: no data yet";
-			} else {
-				cell.textLabel.text = [NSString stringWithFormat:@"Last request: %@ in (%@ cached), %@ out",
-					[usage objectForKey:@"prompt"], [usage objectForKey:@"cached"], [usage objectForKey:@"output"]];
-			}
+			cell.textLabel.text = (usage == nil)
+				? @"Last request: no data yet"
+				: [NSString stringWithFormat:@"Last request: %@ in (%@ cached), %@ out", [usage objectForKey:@"prompt"], [usage objectForKey:@"cached"], [usage objectForKey:@"output"]];
 			cell.textLabel.font = [UIFont systemFontOfSize:14.0f];
-		} else if (indexPath.row == 4) {
-			cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-			cell.textLabel.text = @"Raw JSON Chat Debugger";
-		} else if (indexPath.row == 5) {
-			cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-			cell.textLabel.text = @"About";
+			return cell;
 		}
+		case AGRowWebSwitch:
+			return [self switchCellForRow:row title:@"Web Access" on:[AGWebAccess isEnabled] action:@selector(webSwitchChanged:) tableView:tableView];
+		case AGRowWebDevices: {
+			NSString *value = [AGWebAccess isRunning] ? [NSString stringWithFormat:@"Port %lu", (unsigned long)[AGWebAccess port]] : ([AGWebAccess lastError] != nil ? @"Error" : @"Off");
+			return [self linkCellForRow:row title:@"Address & Devices" value:value tableView:tableView];
+		}
+		case AGRowRawJSON:
+			return [self linkCellForRow:row title:@"Raw JSON Chat Debugger" value:nil tableView:tableView];
+		case AGRowAbout:
+		default:
+			return [self linkCellForRow:row title:@"About" value:nil tableView:tableView];
 	}
-
-	return cell;
 }
 
 - (void)webSwitchChanged:(UISwitch *)sender {
@@ -256,47 +231,19 @@
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
 	[tableView deselectRowAtIndexPath:indexPath animated:YES];
-	if (indexPath.section == 3) {
-		if (indexPath.row == 1) [self.navigationController pushViewController:[[[AGWebAccessViewController alloc] init] autorelease] animated:YES];
-		return;
+	UIViewController *controller = nil;
+	switch (AGRowAt(indexPath)) {
+		case AGRowModelConfigs:    controller = [[[AGProviderProfilesViewController alloc] init] autorelease]; break;
+		case AGRowSystemPrompt:    controller = [[[AGSystemPromptViewController alloc] init] autorelease]; break;
+		case AGRowThinking:        [self showThinkingMenu]; return;
+		case AGRowAgentGuardrails: controller = [[[AGAgentSettingsViewController alloc] init] autorelease]; break;
+		case AGRowChatLimits:      controller = [[[AGChatLimitsViewController alloc] init] autorelease]; break;
+		case AGRowWebDevices:      controller = [[[AGWebAccessViewController alloc] init] autorelease]; break;
+		case AGRowRawJSON:         controller = [[[AGRawJSONViewController alloc] init] autorelease]; break;
+		case AGRowAbout:           controller = [[[AGAboutViewController alloc] init] autorelease]; break;
+		default: return;   // switches and the read-only usage row
 	}
-	if (indexPath.section == 0) {
-		if (indexPath.row == 2) {
-			[self showThinkingMenu];
-			return;
-		}
-		if (indexPath.row == 0) {
-			AGProviderProfilesViewController *controller = [[[AGProviderProfilesViewController alloc] init] autorelease];
-			[self.navigationController pushViewController:controller animated:YES];
-		} else {
-			AGSystemPromptViewController *controller = [[[AGSystemPromptViewController alloc] init] autorelease];
-			[self.navigationController pushViewController:controller animated:YES];
-		}
-		return;
-	}
-
-	if (indexPath.section == 2) {
-		if (indexPath.row == 0) {
-			AGAgentSettingsViewController *controller = [[[AGAgentSettingsViewController alloc] init] autorelease];
-			[self.navigationController pushViewController:controller animated:YES];
-			return;
-		} else if (indexPath.row == 1) {
-			AGChatLimitsViewController *controller = [[[AGChatLimitsViewController alloc] init] autorelease];
-			[self.navigationController pushViewController:controller animated:YES];
-			return;
-		} else if (indexPath.row == 3) {
-			return; // read-only usage row
-		} else if (indexPath.row == 4) {
-			AGRawJSONViewController *controller = [[[AGRawJSONViewController alloc] init] autorelease];
-			[self.navigationController pushViewController:controller animated:YES];
-			return;
-		} else if (indexPath.row == 5) {
-			AGAboutViewController *controller = [[[AGAboutViewController alloc] init] autorelease];
-			[self.navigationController pushViewController:controller animated:YES];
-			return;
-		}
-	}
-
+	[self.navigationController pushViewController:controller animated:YES];
 }
 
 @end

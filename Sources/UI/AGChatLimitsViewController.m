@@ -1,5 +1,6 @@
 #import "AGChatLimitsViewController.h"
 #import "AGConversationStore.h"
+#import "AGInfoCell.h"
 
 @interface AGChatLimitsViewController ()
 @property (nonatomic, retain) UITextField *saveLimitTextField;
@@ -30,57 +31,62 @@
 }
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-	return 3;
-}
-
-- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
 	return 1;
 }
 
-- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
-	if (section == 0) return @"Messages Saved to Disk";
-	if (section == 1) return @"Messages Loaded in Interface";
-	return @"Context Budget Sent to Model (tokens)";
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+	return 3;
 }
 
-- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-	if (section == 0) {
-		return @"Maximum number of recent messages persisted to JSON per conversation. Set to 0 for unlimited (recommended to prevent history loss).";
-	}
-	if (section == 1) return @"Maximum number of recent messages loaded into the chat view. Set to 0 for unlimited.";
-	return @"When the estimated size of the history passes this, old tool output and file contents are shrunk, then old turns are left out (the first message is always kept). Your saved chat is not changed. Default 24000; 0 = never shrink. Needs Token Saver on.";
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
+	return @"History & context";
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-	NSString *CellIdentifier = [NSString stringWithFormat:@"LimitCell%ld", (long)indexPath.section];
-	UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:CellIdentifier];
+	NSString *CellIdentifier = [NSString stringWithFormat:@"LimitCell%ld", (long)indexPath.row];
+	AGInfoCell *cell = (AGInfoCell *)[tableView dequeueReusableCellWithIdentifier:CellIdentifier];
 	if (cell == nil) {
-		cell = [[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:CellIdentifier] autorelease];
-		
-		UITextField *textField = [[[UITextField alloc] initWithFrame:CGRectMake(15, 8, [UIScreen mainScreen].bounds.size.width - 60, 30)] autorelease];
-		textField.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+		cell = [[[AGInfoCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:CellIdentifier] autorelease];
+		cell.selectionStyle = UITableViewCellSelectionStyleNone;
+
+		// The title is on the left with its (i); the number sits on the right.
+		UITextField *textField = [[[UITextField alloc] initWithFrame:CGRectMake(0, 0, 90, 30)] autorelease];
+		textField.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin;
+		textField.textAlignment = UITextAlignmentRight;
 		textField.keyboardType = UIKeyboardTypeNumberPad;
 		textField.delegate = self;
 		textField.borderStyle = UITextBorderStyleNone;
-		textField.clearButtonMode = UITextFieldViewModeWhileEditing;
+		textField.clearButtonMode = UITextFieldViewModeNever;
+		CGFloat contentWidth = tableView.bounds.size.width - 20.0f;
+		if (contentWidth < 200.0f) contentWidth = 300.0f;
+		textField.frame = CGRectMake(contentWidth - 90.0f - 12.0f, 7.0f, 90.0f, 30.0f);
 
-		if (indexPath.section == 0) {
+		if (indexPath.row == 0) {
 			self.saveLimitTextField = textField;
 			NSInteger savedLimit = [AGConversationStore savedMessageLimit];
 			textField.text = (savedLimit < 0) ? @"" : [NSString stringWithFormat:@"%ld", (long)savedLimit];
-			textField.placeholder = @"Default (0 - Unlimited)";
-		} else if (indexPath.section == 2) {
-			self.budgetTextField = textField;
-			textField.text = [NSString stringWithFormat:@"%ld", (long)[AGConversationStore configuredContextTokenBudget]];
-			textField.placeholder = @"Default (24000)";
-		} else {
+			textField.placeholder = @"0 = all";
+		} else if (indexPath.row == 1) {
 			self.loadLimitTextField = textField;
 			NSInteger loadedLimit = [AGConversationStore loadedMessageLimit];
 			textField.text = (loadedLimit < 0) ? @"" : [NSString stringWithFormat:@"%ld", (long)loadedLimit];
-			textField.placeholder = @"Default (30)";
+			textField.placeholder = @"30";
+		} else {
+			self.budgetTextField = textField;
+			textField.text = [NSString stringWithFormat:@"%ld", (long)[AGConversationStore configuredContextTokenBudget]];
+			textField.placeholder = @"24000";
 		}
-
 		[cell.contentView addSubview:textField];
+	}
+	if (indexPath.row == 0) {
+		cell.textLabel.text = @"Saved to disk";
+		cell.infoText = @"Maximum number of recent messages kept per conversation. 0 means unlimited, which is recommended so history is not lost.";
+	} else if (indexPath.row == 1) {
+		cell.textLabel.text = @"Shown in chat";
+		cell.infoText = @"Maximum number of recent messages loaded into the chat view. 0 means unlimited. Default 30.";
+	} else {
+		cell.textLabel.text = @"Context budget (tokens)";
+		cell.infoText = @"When the estimated size of the history passes this, old tool output and file contents are shrunk, then old turns are left out (the first message is always kept). Your saved chat is not changed.\n\nDefault 24000. 0 means never shrink. Needs Token Saver on.";
 	}
 	return cell;
 }

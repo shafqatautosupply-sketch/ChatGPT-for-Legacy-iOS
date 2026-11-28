@@ -19,6 +19,22 @@ static NSString * const AGDefaultModel = @"gemini-2.5-flash";
 @implementation AGProviderConfig
 
 + (NSString *)defaultSystemPrompt {
+	return @"You are a helpful assistant running inside a lightweight iOS app on an older iPhone. "
+		@"Answer directly and accurately and keep replies short unless the user asks for detail. "
+		@"Use plain text with simple Markdown (short lists, `inline code`, fenced code blocks); avoid tables and long preambles. "
+		@"If a request is ambiguous, state your assumption or ask one short question. Say so when you are unsure instead of guessing.\n\n"
+		@"When tools are available you work inside a sandboxed workspace folder. Look before you change anything: "
+		@"locate files with `ls` or `find . -name '<name>'` and read only the line ranges you need. "
+		@"Change existing files with editFile (small exact replacements) instead of rewriting them with writeFile. "
+		@"Commands run without a shell: chain steps with && and do not use pipes, redirects or $(). "
+		@"Check the exit code; if a command fails, read the error and fix the cause instead of repeating it. "
+		@"Never delete or overwrite files the user did not ask you to touch, and ask first if a task needs anything outside the workspace. "
+		@"Do not repeat file contents back; summarise what you changed and what the user needs to do next.";
+}
+
+/// The default of versions before this one. Used once to move people who never customised
+/// the prompt to the new default (a prompt you edited is never touched).
++ (NSString *)legacyDefaultSystemPrompt {
 	return @"You are a concise, helpful assistant in a legacy iOS app. Prefer clear, direct answers. "
 		@"When working with files: locate them with `ls` or `find . -name '<name>'` before reading; read only the line ranges you need; "
 		@"change existing files with editFile (small exact replacements) instead of rewriting them with writeFile; "
@@ -74,6 +90,13 @@ static NSString * const AGDefaultModel = @"gemini-2.5-flash";
 	NSMutableDictionary *registered = [NSMutableDictionary dictionaryWithDictionary:bundleDefaults];
 	[registered setObject:[self defaultSystemPrompt] forKey:AGSystemPromptKey];
 	[defaults registerDefaults:registered];
+
+	// Someone still on the old built-in prompt (saved unchanged) gets the new default.
+	NSDictionary *persisted = [defaults persistentDomainForName:[[NSBundle mainBundle] bundleIdentifier]];
+	NSString *savedPrompt = [persisted objectForKey:AGSystemPromptKey];
+	if ([savedPrompt isKindOfClass:[NSString class]] && [savedPrompt isEqualToString:[self legacyDefaultSystemPrompt]]) {
+		[defaults setObject:[self defaultSystemPrompt] forKey:AGSystemPromptKey];
+	}
 
 	NSArray *stored = [defaults objectForKey:AGProviderProfilesKey];
 	if (![stored isKindOfClass:[NSArray class]] || [stored count] == 0) {

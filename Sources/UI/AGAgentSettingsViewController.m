@@ -5,6 +5,7 @@
 #import "AGApproval.h"
 #import "AGBackgroundKeeper.h"
 #import "AGApprovalPresenter.h"
+#import "AGInfoCell.h"
 #import <QuartzCore/QuartzCore.h>
 
 @interface AGAgentTextEditorViewController : UITableViewController <UIAlertViewDelegate>
@@ -179,7 +180,7 @@
 @synthesize timeoutField = _timeoutField;
 @synthesize stepsField = _stepsField;
 
-enum { AGSectionWorkspace = 0, AGSectionInterval, AGSectionLimits, AGSectionConfirm, AGSectionBackground, AGSectionTLS, AGSectionLists, AGSectionCount };
+enum { AGSectionWorkspace = 0, AGSectionLimits, AGSectionConfirm, AGSectionBackground, AGSectionTLS, AGSectionLists, AGSectionCount };
 
 - (id)init {
 	self = [super initWithStyle:UITableViewStyleGrouped];
@@ -224,7 +225,7 @@ enum { AGSectionWorkspace = 0, AGSectionInterval, AGSectionLimits, AGSectionConf
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return AGSectionCount; }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-	if (section == AGSectionLimits) return 2;
+	if (section == AGSectionLimits) return 3;
 	if (section == AGSectionConfirm) return 2;
 	if (section == AGSectionBackground) return 3;
 	if (section == AGSectionLists) return 4;
@@ -233,88 +234,112 @@ enum { AGSectionWorkspace = 0, AGSectionInterval, AGSectionLimits, AGSectionConf
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
 	switch (section) {
-		case AGSectionWorkspace: return @"Workspace Directory";
-		case AGSectionInterval: return @"Minimum seconds between requests";
-		case AGSectionLimits: return @"Safety limits";
+		case AGSectionWorkspace: return @"Workspace folder";
+		case AGSectionLimits: return @"Limits";
 		case AGSectionConfirm: return @"Ask me before";
 		case AGSectionBackground: return @"Background";
 		case AGSectionTLS: return @"Network security";
-		default: return @"Agent Guardrails";
+		default: return @"Command lists";
 	}
 }
 
-- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-	if (section == AGSectionLimits) return @"Row 1: seconds before a running command is killed. Row 2: maximum model requests per task, a guard against runaway loops.";
-	if (section == AGSectionConfirm) return @"Row 1: the agent runs make or python (a Makefile or script can run any code as this app; the prompt shows its first lines). Row 2: the agent moves a file or folder to the trash. With no answer in 10 minutes the action is not done.";
-	if (section == AGSectionBackground) return @"Row 1: keep a running task going after you leave the app and notify you when it finishes. Row 2: when the app is not visible, questions appear as a system dialog over whatever you are doing; if that is not possible you get a notification instead. Row 3 tries it.";
-	if (section == AGSectionTLS) return @"Certificates are verified against the bundled CA list. Turn this on only if a verified connection fails and you accept that anyone on the network could read your API key.";
-	if (section == AGSectionLists) return @"Commands run without a shell: pipes, redirects, ; and $() are not available. Hard Block and Secret paths always include the built-in list; entries here are added to it.";
-	return nil;
+/// What the (i) button on a row says. Nothing is shown under the rows any more.
+- (NSString *)infoForIndexPath:(NSIndexPath *)indexPath {
+	switch (indexPath.section) {
+		case AGSectionLimits:
+			if (indexPath.row == 0) return @"Minimum seconds between two requests to the model.";
+			if (indexPath.row == 1) return @"Seconds before a running command is killed.";
+			return @"Maximum model requests per task. A guard against runaway loops.";
+		case AGSectionConfirm:
+			if (indexPath.row == 0) return @"Asks before the agent runs make or python. A Makefile or script can run any code as this app; the prompt shows its first lines.\n\nWith no answer in 10 minutes the action is not done.";
+			return @"Asks before the agent moves a file or folder to the trash.\n\nWith no answer in 10 minutes the action is not done.";
+		case AGSectionBackground:
+			if (indexPath.row == 0) return @"Keeps a running task going after you leave the app and notifies you when it finishes.";
+			if (indexPath.row == 1) return @"When the app is not visible, questions appear as a system dialog over whatever you are doing. If that is not possible you get a notification instead.\n\nUse \"Test the approval dialog\" to try it.";
+			return nil;
+		case AGSectionTLS:
+			return @"Certificates are verified against the bundled CA list. Turn this on only if a verified connection fails and you accept that anyone on the network could read your API key.";
+		case AGSectionLists:
+			if (indexPath.row == 0) return @"Only 'export NAME=value' lines are used. There is no shell to run anything else.";
+			if (indexPath.row == 1) return @"Commands run without a shell: pipes, redirects, ; and $() are not available.\n\ncycript is not allowed by default: it can run arbitrary code and attach to other processes.";
+			return @"The built-in list is always included. Entries here are added to it.";
+		default:
+			return nil;
+	}
 }
 
-- (UITableViewCell *)fieldCellWithID:(NSString *)identifier field:(UITextField *)field label:(NSString *)label tableView:(UITableView *)tableView {
-	UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:identifier];
+- (AGInfoCell *)infoCellWithID:(NSString *)identifier style:(UITableViewCellStyle)style indexPath:(NSIndexPath *)indexPath tableView:(UITableView *)tableView {
+	AGInfoCell *cell = (AGInfoCell *)[tableView dequeueReusableCellWithIdentifier:identifier];
 	if (cell == nil) {
-		cell = [[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:identifier] autorelease];
+		cell = [[[AGInfoCell alloc] initWithStyle:style reuseIdentifier:identifier] autorelease];
+	}
+	cell.infoText = [self infoForIndexPath:indexPath];
+	return cell;
+}
+
+- (UITableViewCell *)workspaceCell:(UITableView *)tableView {
+	UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"WorkspaceCell"];
+	if (cell == nil) {
+		cell = [[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"WorkspaceCell"] autorelease];
 		cell.selectionStyle = UITableViewCellSelectionStyleNone;
+		[cell.contentView addSubview:self.workspaceField];
+	}
+	CGFloat contentWidth = tableView.bounds.size.width - 20.0f;
+	if (contentWidth < 200.0f) contentWidth = 300.0f;
+	CGRect frame = self.workspaceField.frame;
+	frame.size.width = contentWidth - 24.0f;
+	self.workspaceField.frame = frame;
+	self.workspaceField.placeholder = @"Workspace path";
+	return cell;
+}
+
+/// A labelled number row: title on the left (with its (i)), the value on the right.
+- (UITableViewCell *)numberCellWithID:(NSString *)identifier title:(NSString *)title field:(UITextField *)field indexPath:(NSIndexPath *)indexPath tableView:(UITableView *)tableView {
+	AGInfoCell *cell = [self infoCellWithID:identifier style:UITableViewCellStyleDefault indexPath:indexPath tableView:tableView];
+	if (field.superview != cell.contentView) {
+		cell.selectionStyle = UITableViewCellSelectionStyleNone;
+		field.textAlignment = UITextAlignmentRight;
+		field.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin;
 		[cell.contentView addSubview:field];
 	}
 	CGFloat contentWidth = tableView.bounds.size.width - 20.0f;
 	if (contentWidth < 200.0f) contentWidth = 300.0f;
-	CGRect frame = field.frame;
-	frame.size.width = contentWidth - 24.0f;
-	field.frame = frame;
-	field.placeholder = label;
+	field.frame = CGRectMake(contentWidth - 86.0f - 12.0f, 10.0f, 86.0f, 24.0f);
+	field.placeholder = @"0";
+	cell.textLabel.text = title;
 	return cell;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
 	switch (indexPath.section) {
-		case AGSectionWorkspace: return [self fieldCellWithID:@"WorkspaceCell" field:self.workspaceField label:@"Workspace path" tableView:tableView];
-		case AGSectionInterval: return [self fieldCellWithID:@"IntervalCell" field:self.intervalField label:@"Seconds" tableView:tableView];
+		case AGSectionWorkspace: return [self workspaceCell:tableView];
 		case AGSectionLimits:
-			return (indexPath.row == 0)
-				? [self fieldCellWithID:@"TimeoutCell" field:self.timeoutField label:@"Command timeout (seconds)" tableView:tableView]
-				: [self fieldCellWithID:@"StepsCell" field:self.stepsField label:@"Max agent steps per task" tableView:tableView];
+			if (indexPath.row == 0) return [self numberCellWithID:@"IntervalCell" title:@"Request gap (sec)" field:self.intervalField indexPath:indexPath tableView:tableView];
+			if (indexPath.row == 1) return [self numberCellWithID:@"TimeoutCell" title:@"Command timeout (sec)" field:self.timeoutField indexPath:indexPath tableView:tableView];
+			return [self numberCellWithID:@"StepsCell" title:@"Max steps per task" field:self.stepsField indexPath:indexPath tableView:tableView];
 		case AGSectionConfirm:
 			return (indexPath.row == 0)
-				? [self switchCellWithID:@"ConfirmCodeCell" title:@"make / python" on:[AGApproval confirmCodeEnabled] action:@selector(confirmCodeChanged:) tableView:tableView]
-				: [self switchCellWithID:@"ConfirmDeleteCell" title:@"Deleting files" on:[AGApproval confirmDeleteEnabled] action:@selector(confirmDeleteChanged:) tableView:tableView];
+				? [self switchCellWithID:@"ConfirmCodeCell" title:@"make / python" on:[AGApproval confirmCodeEnabled] action:@selector(confirmCodeChanged:) indexPath:indexPath tableView:tableView]
+				: [self switchCellWithID:@"ConfirmDeleteCell" title:@"Deleting files" on:[AGApproval confirmDeleteEnabled] action:@selector(confirmDeleteChanged:) indexPath:indexPath tableView:tableView];
 		case AGSectionBackground:
-			if (indexPath.row == 0) return [self switchCellWithID:@"BackgroundCell" title:@"Keep running in background" on:[AGBackgroundKeeper enabled] action:@selector(backgroundChanged:) tableView:tableView];
-			if (indexPath.row == 1) return [self switchCellWithID:@"GlobalPromptCell" title:@"Ask over other apps" on:[AGApprovalPresenter globalDialogsEnabled] action:@selector(globalPromptChanged:) tableView:tableView];
+			if (indexPath.row == 0) return [self switchCellWithID:@"BackgroundCell" title:@"Keep running in background" on:[AGBackgroundKeeper enabled] action:@selector(backgroundChanged:) indexPath:indexPath tableView:tableView];
+			if (indexPath.row == 1) return [self switchCellWithID:@"GlobalPromptCell" title:@"Ask over other apps" on:[AGApprovalPresenter globalDialogsEnabled] action:@selector(globalPromptChanged:) indexPath:indexPath tableView:tableView];
 			{
-				UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"TestPromptCell"];
+				AGInfoCell *cell = (AGInfoCell *)[tableView dequeueReusableCellWithIdentifier:@"TestPromptCell"];
 				if (cell == nil) {
-					cell = [[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"TestPromptCell"] autorelease];
+					cell = [[[AGInfoCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"TestPromptCell"] autorelease];
 					cell.selectionStyle = UITableViewCellSelectionStyleBlue;
 					cell.textLabel.textColor = [UIColor colorWithRed:0.0f green:0.4f blue:0.8f alpha:1.0f];
 				}
 				cell.textLabel.text = @"Test the approval dialog";
 				return cell;
 			}
-		case AGSectionTLS: {
-			UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"TLSCell"];
-			if (cell == nil) {
-				cell = [[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"TLSCell"] autorelease];
-				cell.selectionStyle = UITableViewCellSelectionStyleNone;
-				cell.accessoryView = [[[UISwitch alloc] initWithFrame:CGRectZero] autorelease];
-			}
-			cell.textLabel.text = @"Allow insecure TLS";
-			UISwitch *toggle = (UISwitch *)cell.accessoryView;
-			[toggle removeTarget:nil action:NULL forControlEvents:UIControlEventValueChanged];
-			[toggle addTarget:self action:@selector(tlsSwitchChanged:) forControlEvents:UIControlEventValueChanged];
-			toggle.on = [AGHTTPClient isInsecureTLSEnabled];
-			return cell;
-		}
+		case AGSectionTLS:
+			return [self switchCellWithID:@"TLSCell" title:@"Allow insecure TLS" on:[AGHTTPClient isInsecureTLSEnabled] action:@selector(tlsSwitchChanged:) indexPath:indexPath tableView:tableView];
 		default: {
-			UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"GuardrailCell"];
-			if (cell == nil) {
-				cell = [[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"GuardrailCell"] autorelease];
-				cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-				cell.selectionStyle = UITableViewCellSelectionStyleBlue;
-				cell.textLabel.font = [UIFont boldSystemFontOfSize:17.0f];
-			}
+			AGInfoCell *cell = [self infoCellWithID:@"GuardrailCell" style:UITableViewCellStyleDefault indexPath:indexPath tableView:tableView];
+			cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+			cell.selectionStyle = UITableViewCellSelectionStyleBlue;
 			NSArray *titles = [NSArray arrayWithObjects:@"Pre-Execution Commands", @"Allowed Binaries", @"Hard Block Paths", @"Secret Paths", nil];
 			cell.textLabel.text = [titles objectAtIndex:(NSUInteger)indexPath.row];
 			return cell;
@@ -322,15 +347,15 @@ enum { AGSectionWorkspace = 0, AGSectionInterval, AGSectionLimits, AGSectionConf
 	}
 }
 
-- (UITableViewCell *)switchCellWithID:(NSString *)identifier title:(NSString *)title on:(BOOL)on action:(SEL)action tableView:(UITableView *)tableView {
-	UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:identifier];
-	if (cell == nil) {
-		cell = [[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:identifier] autorelease];
-		cell.selectionStyle = UITableViewCellSelectionStyleNone;
-		cell.accessoryView = [[[UISwitch alloc] initWithFrame:CGRectZero] autorelease];
+- (UITableViewCell *)switchCellWithID:(NSString *)identifier title:(NSString *)title on:(BOOL)on action:(SEL)action indexPath:(NSIndexPath *)indexPath tableView:(UITableView *)tableView {
+	AGInfoCell *cell = [self infoCellWithID:identifier style:UITableViewCellStyleDefault indexPath:indexPath tableView:tableView];
+	cell.selectionStyle = UITableViewCellSelectionStyleNone;
+	UISwitch *toggle = (UISwitch *)cell.accessoryView;
+	if (![toggle isKindOfClass:[UISwitch class]]) {
+		toggle = [[[UISwitch alloc] initWithFrame:CGRectZero] autorelease];
+		cell.accessoryView = toggle;
 	}
 	cell.textLabel.text = title;
-	UISwitch *toggle = (UISwitch *)cell.accessoryView;
 	[toggle removeTarget:nil action:NULL forControlEvents:UIControlEventValueChanged];
 	[toggle addTarget:self action:action forControlEvents:UIControlEventValueChanged];
 	toggle.on = on;

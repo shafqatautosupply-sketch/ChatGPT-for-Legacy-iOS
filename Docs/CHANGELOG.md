@@ -1,6 +1,11 @@
 # Changelog
 
 ## Unreleased
+- **Settings tidy-up.** The main Settings list is regrouped into Model, Agent, Chat, Token usage, Other devices and
+  Advanced (it was Model / Mode / Agent & Debugging / Other devices). The paragraphs under the rows are gone: each row
+  that needs an explanation has a small (i) button after its title that opens it in an alert. Agent Guardrails shows
+  its number settings as labelled rows (Request gap, Command timeout, Max steps) instead of unlabelled boxes, and
+  Chat History Limits is one section with three labelled rows. New `AGInfoCell` (Sources/UI) provides the (i) button.
 - **Kernel sandbox for commands (Seatbelt).** Every command runs with writes limited to the workspace, no reads
   of `/var/mobile` outside the workspace/Theos, no network and no Mach lookups; descriptors above 2 are closed.
   The app first proves the kernel enforces the profile. `rm` is now on the default allowed list, behind the
